@@ -26,29 +26,34 @@ if (startResult && typeof startResult.then === 'function') {
     .then((result) => {
       console.log("LND started successfully:", result);
 
-      // setTimeout(() => {
-      //   console.log("Subscribing to state changes");
-      //   const unsubscribe = addon.subscribeState(
-      //     "",
-      //     (d) => {
-      //       console.log("!!!!!!!Received state update",d,d.length)
-      //       unsubscribe();
+      setTimeout(async () => {
+        console.log("getInfo");
+        const getInfoResult = await addon.getInfo("");
+        console.log("getInfo result:", getInfoResult);
+      }, 3000);
 
-      //     },
-      //     (error) => {
-      //       console.error("!!!!!!Error subscribing to state:", error)
+      setTimeout(() => {
+        console.log("Subscribing to state changes");
+        const unsubscribe = addon.subscribeState(
+          "",
+          (d) => {
+            console.log("!!!!!!!Received state update",d,d.length)
+            unsubscribe();
 
-      //     }
-      //   );
-      //   console.log("Subscribe function returned:", unsubscribe);
+          },
+          (error) => {
+            console.error("!!!!!!Error subscribing to state:", error)
+
+          }
+        );
+        console.log("Subscribe function returned:", unsubscribe);
 
 
-      //   // setTimeout(() => {
-      //   //   unsubscribe();
-      //   // }, 2000);
+        // setTimeout(() => {
+        //   unsubscribe();
+        // }, 2000);
 
-      // }, 1000);
-
+      }, 1000);
     })
     .catch((error) => {
       console.error("Error starting LND:", error);

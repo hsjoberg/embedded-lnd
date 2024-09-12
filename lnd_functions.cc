@@ -44,7 +44,7 @@ Napi::Value CallLndFunction(const Napi::CallbackInfo& info, const std::string& f
             callbackData
         };
 
-        func(const_cast<char*>(args.c_str()), callback);
+        func(const_cast<char*>(args.c_str()), static_cast<int>(args.size()), callback);
         LOG(functionName << " called successfully");
     } catch (const Napi::Error& e) {
         ERROR("Napi error: " << e.what());

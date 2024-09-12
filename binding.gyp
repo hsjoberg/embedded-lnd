@@ -3,7 +3,7 @@
     "target_name": "addon",
     "cflags!": [ "-fno-exceptions" ],
     "cflags_cc!": [ "-fno-exceptions" ],
-    "sources": [ "addon.cc", "lnd_functions.cpp" ],
+    "sources": [ "addon.cc", "lnd_functions.cpp", "lnd_server_streams.cpp" ],
     "include_dirs": [
       "<!@(node -p \"require('node-addon-api').include\")",
       "."
