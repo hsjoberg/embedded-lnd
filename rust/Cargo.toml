@@ -1,0 +1,16 @@
+[package]
+name = "lnd_rust_wrapper"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "lnd_rust_wrapper"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lnd_example"
+path = "src/main.rs"
+
+[dependencies]
+libloading = "0.7"
+tokio = { version = "1.0", features = ["full"] }
