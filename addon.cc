@@ -69,7 +69,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
                 1
             );
 
-            auto* callbackData = new CallbackData{tsfn, ""};
+            auto* callbackData = new CallbackData{tsfn};
 
             CCallback callback = {
                 ResponseCallback,

@@ -2,6 +2,8 @@
 #include <iostream>
 #include <string>
 
+#include "base64.hpp"
+
 #define LOG(x) std::cout << x << std::endl
 #define ERROR(x) std::cerr << x << std::endl
 
@@ -9,7 +11,7 @@ Napi::Value CallLndStream(const Napi::CallbackInfo& info, const std::string& fun
     Napi::Env env = info.Env();
 
     if (info.Length() <3 || !info[0].IsString() || !info[1].IsFunction() || !info[2].IsFunction()) {
-        throw Napi::Error::New(env, "Invalid arguments. Expected (string, function, function)");
+        throw Napi::Error::New(env, "Invalid arguments for " +  functionName + ". Expected (string, function, function)");
     }
 
     std::string args = info[0].As<Napi::String>().Utf8Value();
@@ -46,7 +48,7 @@ Napi::Value CallLndStream(const Napi::CallbackInfo& info, const std::string& fun
     };
 
     callbackData->cleanup = [functionName, args]() {
-        // Implement cleanup logic here, e.g., calling a close/unsubscribe function
+        // TODO(hsjoberg): server streams can't be closed in falafel
         LOG(functionName << " stream closed");
     };
 
@@ -63,19 +65,17 @@ void StreamResponseCallback(void* context, const char* data, int length) {
         LOG("Stream is not active");
         return;
     }
-    LOG("Stream is active");
 
-    std::string result(data, length);
+    std::string encoded = base64::to_base64(std::string_view(data, length));
 
-    auto callback = [result](Napi::Env env, Napi::Function jsCallback) {
-        jsCallback.Call({Napi::String::New(env, result)});
+    auto callback = [encoded](Napi::Env env, Napi::Function jsCallback) {
+        jsCallback.Call({Napi::String::New(env, encoded)});
     };
 
     callbackData->dataTsfn.NonBlockingCall(callback);
 }
 
 void StreamErrorCallback(void* context, const char* error) {
-    LOG("ERROR");
     auto* callbackData = static_cast<StreamCallbackData*>(context);
     if (!callbackData->active) {
         LOG("Stream is not active");

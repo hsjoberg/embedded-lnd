@@ -69,18 +69,6 @@ function gracefulShutdown() {
   if (isShuttingDown) return;
   isShuttingDown = true;
 
-  console.log("Graceful shutdown initiated");
-
-  try {
-      unsubscribe();
-      console.log("Unsubscribed successfully");
-  } catch (error) {
-      console.error("Error during unsubscribe:", error);
-  }
-
-  // Add any other cleanup operations here
-
-  console.log("Shutdown complete");
   process.exit(0);
 }
 

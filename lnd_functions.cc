@@ -3,6 +3,8 @@
 #include <iostream>
 #include <string>
 
+#include "base64.hpp"
+
 #define LOG(x) std::cout << x << std::endl
 #define ERROR(x) std::cerr << x << std::endl
 
@@ -11,15 +13,13 @@ Napi::Value CallLndFunction(const Napi::CallbackInfo& info, const std::string& f
     Napi::Promise::Deferred deferred = Napi::Promise::Deferred::New(env);
 
     try {
-        std::string args;
-        if (info.Length() > 0) {
-            args = info[0].As<Napi::String>().Utf8Value();
-        } else {
-            deferred.Reject(Napi::Error::New(env, "Invalid argument type for " + functionName).Value());
+        std::string dataByteArray;
+        if (info.Length() < 1 || !info[0].IsString()) {
+            deferred.Reject(Napi::Error::New(env, "Invalid arguments for " + functionName + ". Expected (string)").Value());
             return deferred.Promise();
         }
 
-        LOG(functionName << " called with args: " << args);
+        dataByteArray = base64::from_base64(info[0].As<Napi::String>().Utf8Value());
 
         auto tsfn = Napi::ThreadSafeFunction::New(
             env,
@@ -35,7 +35,7 @@ Napi::Value CallLndFunction(const Napi::CallbackInfo& info, const std::string& f
             1
         );
 
-        auto* callbackData = new CallbackData{tsfn, ""};
+        auto* callbackData = new CallbackData{tsfn};
 
         CCallback callback = {
             ResponseCallback,
@@ -44,7 +44,7 @@ Napi::Value CallLndFunction(const Napi::CallbackInfo& info, const std::string& f
             callbackData
         };
 
-        func(const_cast<char*>(args.c_str()), static_cast<int>(args.size()), callback);
+        func(const_cast<char*>(dataByteArray.c_str()), static_cast<int>(dataByteArray.size()), callback);
         LOG(functionName << " called successfully");
     } catch (const Napi::Error& e) {
         ERROR("Napi error: " << e.what());
@@ -62,11 +62,11 @@ Napi::Value CallLndFunction(const Napi::CallbackInfo& info, const std::string& f
 
 void ResponseCallback(void* context, const char* data, int length) {
     auto* callbackData = static_cast<CallbackData*>(context);
-    callbackData->result = std::string(data, length);
+    std::string encoded = base64::to_base64(std::string_view(data, length));
 
-    auto callback = [](Napi::Env env, Napi::Function jsCallback, CallbackData* data) {
-        jsCallback.Call({env.Null(), Napi::String::New(env, data->result)});
-        delete data;
+    auto callback = [encoded](Napi::Env env, Napi::Function jsCallback, CallbackData* cbData) {
+        jsCallback.Call({env.Null(), Napi::String::New(env, encoded)});
+        delete cbData;
     };
 
     callbackData->tsfn.BlockingCall(callbackData, callback);
@@ -75,10 +75,9 @@ void ResponseCallback(void* context, const char* data, int length) {
 
 void ErrorCallback(void* context, const char* error) {
     auto* callbackData = static_cast<CallbackData*>(context);
-    callbackData->result = error;
 
-    auto callback = [](Napi::Env env, Napi::Function jsCallback, CallbackData* data) {
-        jsCallback.Call({Napi::Error::New(env, data->result).Value(), env.Null()});
+    auto callback = [error](Napi::Env env, Napi::Function jsCallback, CallbackData* data) {
+        jsCallback.Call({Napi::Error::New(env, error).Value(), env.Null()});
         delete data;
     };
 

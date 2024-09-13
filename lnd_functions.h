@@ -9,7 +9,6 @@ Napi::Value CallLndFunction(const Napi::CallbackInfo& info, const std::string& f
 
 struct CallbackData {
     Napi::ThreadSafeFunction tsfn;
-    std::string result;
 };
 
 void ResponseCallback(void* context, const char* data, int length);
