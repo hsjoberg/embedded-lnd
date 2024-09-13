@@ -3,7 +3,8 @@
 #include <string>
 #include <functional>
 #include <memory>
-#include "liblnd.h"
+
+#include "../liblnd.h"
 
 typedef void (*LndStreamFuncPtr)(char*, int length, CRecvStream);
 

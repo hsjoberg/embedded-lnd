@@ -1,7 +1,8 @@
 #pragma once
 #include <napi.h>
 #include <string>
-#include "liblnd.h"
+
+#include "../liblnd.h"
 
 typedef void (*LndFuncPtr)(char*, int length, CCallback);
 
