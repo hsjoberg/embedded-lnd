@@ -3,4 +3,5 @@ node_modules
 build
 lnd
 liblnd.so
+liblnd.a
 target
