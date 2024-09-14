@@ -3,16 +3,8 @@ name = "lnd_rust_wrapper"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-name = "lnd_rust_wrapper"
-path = "src/lib.rs"
-
-[[bin]]
-name = "lnd_example"
-path = "src/main.rs"
-
 [dependencies]
-anyhow = "1.0.88"
-libloading = "0.7"
-parking_lot = "0.12.3"
-tokio = { version = "1.0", features = ["full"] }
+libc = "0.2"
+
+[build-dependencies]
+bindgen = "0.60"
