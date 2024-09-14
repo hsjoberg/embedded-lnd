@@ -11,9 +11,5 @@ path = "src/lib.rs"
 name = "lnd_rust_wrapper"
 path = "src/main.rs"
 
-[dependencies]
-base64 = "0.22.1"
-libc = "0.2"
-
 [build-dependencies]
 bindgen = "0.60"
