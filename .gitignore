@@ -5,3 +5,4 @@ lnd
 liblnd.so
 liblnd.a
 target
+.DS_Store
