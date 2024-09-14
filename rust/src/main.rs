@@ -22,11 +22,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("...........................................");
-    std::thread::sleep(std::time::Duration::from_secs(5));
+    std::thread::sleep(std::time::Duration::from_secs(8));
 
-    match client.get_info() {
-        Ok(info) => println!("LND Info: {}", info),
-        Err(e) => eprintln!("Error getting LND info: {}", e),
+    for attempt in 1..=5 {
+        println!("Attempting to get LND info (attempt {})", attempt);
+        match client.get_info() {
+            Ok(info) => {
+                println!("LND Info: {}", info);
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("Error getting LND info: {}", e);
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+        }
     }
 
     // // Call walletBalance
