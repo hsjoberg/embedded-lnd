@@ -11,9 +11,7 @@ fn main() {
 
     let bindings = bindgen::Builder::default()
         .header("liblnd.h")
-        .allowlist_function("start")
-        .allowlist_function("getInfo")
-        .allowlist_function("subscribeState")
+        .allowlist_file("liblnd.h")
         .generate()
         .expect("Unable to generate bindings");
 
