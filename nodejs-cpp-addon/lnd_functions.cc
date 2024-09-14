@@ -13,13 +13,12 @@ Napi::Value CallLndFunction(const Napi::CallbackInfo& info, const std::string& f
     Napi::Promise::Deferred deferred = Napi::Promise::Deferred::New(env);
 
     try {
-        std::string dataByteArray;
         if (info.Length() < 1 || !info[0].IsString()) {
             deferred.Reject(Napi::Error::New(env, "Invalid arguments for " + functionName + ". Expected (string)").Value());
             return deferred.Promise();
         }
 
-        dataByteArray = base64::from_base64(info[0].As<Napi::String>().Utf8Value());
+        std::string dataByteArray = base64::from_base64(info[0].As<Napi::String>().Utf8Value());
 
         auto tsfn = Napi::ThreadSafeFunction::New(
             env,

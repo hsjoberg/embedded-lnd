@@ -1,7 +1,8 @@
 const addon = require('./build/Release/addon');
+const readline = require('readline');
 
 console.log("Loaded addon:", addon);
-console.log(addon.start.name)
+console.log(addon.start.name);
 
 const startArgs = `--lnddir=./lnd
 --noseedbackup
@@ -16,52 +17,55 @@ const startArgs = `--lnddir=./lnd
 --db.bolt.auto-compact-min-age=0
 --neutrino.connect=192.168.10.120:19444`;
 
-console.log("Calling start with args:", startArgs);
+addon.start(startArgs)
+  .then((result) => {
+    console.log("LND started successfully:", result);
 
-const startResult = addon.start(startArgs);
-console.log("Start function returned:", startResult);
+    // Set up readline interface
+    readline.emitKeypressEvents(process.stdin);
+    process.stdin.setRawMode(true);
 
-if (startResult && typeof startResult.then === 'function') {
-  startResult
-    .then((result) => {
-      console.log("LND started successfully:", result);
-
-      setTimeout(async () => {
-        console.log("getInfo");
-        const getInfoResult = await addon.getInfo("");
-        console.log("getInfo result:", getInfoResult);
-      }, 3000);
-
-      setTimeout(() => {
-        console.log("Subscribing to state changes");
-        const unsubscribe = addon.subscribeState(
-          "",
-          (d) => {
-            console.log("!!!!!!!Received state update",d,d.length)
-            unsubscribe();
-
-          },
-          (error) => {
-            console.error("!!!!!!Error subscribing to state:", error)
-
-          }
-        );
-        console.log("Subscribe function returned:", unsubscribe);
-
-
-        // setTimeout(() => {
-        //   unsubscribe();
-        // }, 2000);
-
-      }, 1000);
-    })
-    .catch((error) => {
-      console.error("Error starting LND:", error);
+    process.stdin.on('keypress', (str, key) => {
+      if (key.ctrl && key.name === 'c') {
+        console.log('Ctrl+C pressed. Quitting...');
+        gracefulShutdown();
+      } else {
+        switch (key.name) {
+          case 'q':
+            console.log('Quitting...');
+            gracefulShutdown();
+            break;
+          case 'g':
+            console.log("Requesting getInfo...");
+            addon.getInfo("")
+              .then((getInfoResult) => {
+                console.log("getInfo result:", getInfoResult);
+              })
+              .catch((error) => {
+                console.error("Error getting info:", error);
+              });
+            break;
+          default:
+            break;
+        }
+      }
     });
-} else {
-  console.error("start function did not return a Promise");
-}
 
+    console.log("Subscribing to state changes");
+    const unsubscribe = addon.subscribeState(
+      "",
+      (d) => {
+        console.log("!!!!!!!Received state update", d);
+      },
+      (error) => {
+        console.error("!!!!!!Error subscribing to state:", error);
+      }
+    );
+    console.log("Subscribe function returned:", unsubscribe);
+  })
+  .catch((error) => {
+    console.error("Error starting LND:", error);
+  });
 
 let isShuttingDown = false;
 
@@ -69,17 +73,14 @@ function gracefulShutdown() {
   if (isShuttingDown) return;
   isShuttingDown = true;
 
+  // Restore the default behavior of stdin before exiting
+  process.stdin.setRawMode(false);
+  process.stdin.pause();
+
   process.exit(0);
 }
 
-process.on('SIGINT', gracefulShutdown);
-process.on('SIGTERM', gracefulShutdown);
+console.log("Process running. Press 'q' to quit, 'g' for getInfo, or use Ctrl+C.");
 
-console.log("Process running. Press Ctrl+C to exit.");
-
-// Keep the process alive
-setInterval(() => {
-  if (!isShuttingDown) {
-      console.log("Still alive...");
-  }
-}, 5000);
+// Keep the process alive without using setInterval
+process.stdin.resume();

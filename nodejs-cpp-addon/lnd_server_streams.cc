@@ -14,7 +14,7 @@ Napi::Value CallLndStream(const Napi::CallbackInfo& info, const std::string& fun
         throw Napi::Error::New(env, "Invalid arguments for " +  functionName + ". Expected (string, function, function)");
     }
 
-    std::string args = info[0].As<Napi::String>().Utf8Value();
+    std::string dataByteArray = base64::from_base64(info[0].As<Napi::String>().Utf8Value());
     Napi::Function dataCallback = info[1].As<Napi::Function>();
     Napi::Function errorCallback = info[2].As<Napi::Function>();
 
@@ -52,8 +52,7 @@ Napi::Value CallLndStream(const Napi::CallbackInfo& info, const std::string& fun
         LOG(functionName << " stream closed");
     };
 
-    func(const_cast<char*>(args.c_str()), static_cast<int>(args.size()), callback);
-
+    func(const_cast<char*>(dataByteArray.c_str()), static_cast<int>(dataByteArray.size()), callback);
     LOG(functionName << " stream started successfully");
 
     return CreateUnsubscribeFunction(env, callbackData);
@@ -173,8 +172,8 @@ Napi::Object CreateBiStreamFunctions(const Napi::Env& env, std::shared_ptr<BiStr
             throw Napi::Error::New(env, "Stream is not active.");
         }
 
-        std::string data = info[0].As<Napi::String>().Utf8Value();
-        int result = callbackData->sendStreamFunc(callbackData->streamPtr, const_cast<char*>(data.c_str()), static_cast<int>(data.length()));
+        std::string dataByteArray = base64::from_base64(info[0].As<Napi::String>().Utf8Value());
+        int result = callbackData->sendStreamFunc(callbackData->streamPtr, const_cast<char*>(dataByteArray.c_str()), static_cast<int>(dataByteArray.length()));
 
         return Napi::Number::New(env, result);
     }));
