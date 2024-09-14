@@ -18,8 +18,6 @@ Napi::Value CallLndStream(const Napi::CallbackInfo& info, const std::string& fun
     Napi::Function dataCallback = info[1].As<Napi::Function>();
     Napi::Function errorCallback = info[2].As<Napi::Function>();
 
-    LOG(functionName << " called with args: " << args);
-
     auto callbackData = std::make_shared<StreamCallbackData>();
 
     callbackData->active = true;
@@ -47,7 +45,7 @@ Napi::Value CallLndStream(const Napi::CallbackInfo& info, const std::string& fun
         callbackData.get()
     };
 
-    callbackData->cleanup = [functionName, args]() {
+    callbackData->cleanup = [functionName]() {
         // TODO(hsjoberg): server streams can't be closed in falafel
         LOG(functionName << " stream closed");
     };
