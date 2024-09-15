@@ -66,10 +66,16 @@ impl LndClient {
         Ok(())
     }
 
-    pub fn get_info(&self) -> Result<lnrpc::GetInfoResponse, String> {
-        let request = lnrpc::GetInfoRequest {};
+    pub fn call_lnd_method<Req, Resp>(
+        &self,
+        request: Req,
+        lnd_func: unsafe extern "C" fn(*mut c_char, c_int, CCallback) -> (),
+    ) -> Result<Resp, String>
+    where
+        Req: Message,
+        Resp: Message + Default,
+    {
         let encoded = request.encode_to_vec();
-
         let c_args = CString::new(encoded).unwrap();
         let (tx, rx) = channel::<Result<Vec<u8>, String>>();
 
@@ -94,22 +100,36 @@ impl LndClient {
         };
 
         unsafe {
-            // Get the length before converting to raw pointer
             let c_args_len = c_args.as_bytes().len() as c_int;
             let c_args_ptr = c_args.into_raw();
-            getInfo(c_args_ptr, c_args_len, callback);
-            // Retake ownership of the CString so it will be properly dropped
+            lnd_func(c_args_ptr, c_args_len, callback);
             let _ = CString::from_raw(c_args_ptr);
         }
 
         match rx.recv_timeout(Duration::from_secs(30)) {
             Ok(result) => result.and_then(|bytes| {
-                lnrpc::GetInfoResponse::decode(bytes.as_slice())
+                Resp::decode(bytes.as_slice())
                     .map_err(|e| format!("Failed to decode response: {}", e))
             }),
             Err(_) => Err("Timeout waiting for response".to_string()),
         }
     }
+
+    pub fn get_info(
+        &self,
+        request: lnrpc::GetInfoRequest,
+    ) -> Result<lnrpc::GetInfoResponse, String> {
+        self.call_lnd_method(request, getInfo)
+    }
+
+    pub fn add_invoice(
+        &self,
+        request: lnrpc::Invoice,
+    ) -> Result<lnrpc::AddInvoiceResponse, String> {
+        self.call_lnd_method(request, addInvoice)
+    }
+
+    // Add more methods here as needed
 }
 
 #[cfg(test)]
@@ -120,16 +140,42 @@ mod tests {
     fn test_lnd_client() {
         let client = LndClient::new();
 
+        let start_args = "--lnddir=./lnd \
+            --noseedbackup \
+            --nolisten \
+            --bitcoin.active \
+            --bitcoin.regtest \
+            --bitcoin.node=neutrino \
+            --feeurl=\"https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json\" \
+            --routing.assumechanvalid \
+            --tlsdisableautofill \
+            --db.bolt.auto-compact \
+            --db.bolt.auto-compact-min-age=0 \
+            --neutrino.connect=localhost:19444";
+
         // Test start function
-        match client.start("--lnddir=./lnd --noseedbackup") {
+        match client.start(start_args) {
             Ok(()) => println!("LND started successfully"),
             Err(e) => eprintln!("Start error: {}", e),
         }
 
+        std::thread::sleep(std::time::Duration::from_secs(5));
+
         // Test getInfo function
-        match client.get_info() {
+        match client.get_info(lnrpc::GetInfoRequest {}) {
             Ok(info) => println!("Node info: {:?}", info),
             Err(e) => eprintln!("GetInfo error: {}", e),
+        }
+
+        // Test addInvoice function
+        let invoice = lnrpc::Invoice {
+            memo: "test invoice".to_string(),
+            value: 1000,
+            ..Default::default()
+        };
+        match client.add_invoice(invoice) {
+            Ok(response) => println!("Invoice added: {:?}", response),
+            Err(e) => eprintln!("AddInvoice error: {}", e),
         }
     }
 }

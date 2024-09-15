@@ -15,5 +15,4 @@ path = "src/main.rs"
 bindgen = "0.60"
 
 [dependencies]
-prost = "0.13.2"
-lnd_grpc_rust = { path = "../../lnd-grpc-rust" }
+lnd_grpc_rust = "2.7.0"

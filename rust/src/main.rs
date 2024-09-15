@@ -1,3 +1,4 @@
+use lnd_grpc_rust::lnrpc;
 use lnd_rust_wrapper::LndClient;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -27,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("...........................................");
     std::thread::sleep(std::time::Duration::from_secs(8));
 
-    match client.get_info() {
+    match client.get_info(lnrpc::GetInfoRequest {}) {
         Ok(info) => {
             println!("LND Info: {:?}", info);
         }
@@ -36,6 +37,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             std::thread::sleep(std::time::Duration::from_secs(5));
         }
+    }
+
+    // Test addInvoice function
+    let invoice = lnrpc::Invoice {
+        memo: "test invoice".to_string(),
+        value: 1000,
+        ..Default::default()
+    };
+    match client.add_invoice(invoice) {
+        Ok(response) => println!("Invoice added: {:?}", response),
+        Err(e) => eprintln!("AddInvoice error: {}", e),
     }
 
     // Keep the main thread alive

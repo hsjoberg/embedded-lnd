@@ -2,7 +2,10 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    println!("cargo:rustc-link-search=native={}", env::current_dir().unwrap().display());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        env::current_dir().unwrap().display()
+    );
     println!("cargo:rustc-link-lib=static=lnd");
     println!("cargo:rustc-link-lib=framework=CoreFoundation");
     println!("cargo:rustc-link-lib=framework=Security");
