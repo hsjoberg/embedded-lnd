@@ -7,14 +7,19 @@ fn main() {
         env::current_dir().unwrap().display()
     );
     println!("cargo:rustc-link-lib=static=lnd");
-    println!("cargo:rustc-link-lib=framework=CoreFoundation");
-    println!("cargo:rustc-link-lib=framework=Security");
-    println!("cargo:rerun-if-changed=liblnd.h");
+    println!("cargo:rerun-if-changed=../liblnd.h");
     println!("cargo:rustc-link-lib=resolv");
 
+    if cfg!(target_os = "macos") {
+        println!("cargo:rustc-link-lib=framework=CoreFoundation");
+        println!("cargo:rustc-link-lib=framework=Security");
+    } else if cfg!(target_os = "windows") {
+        // Add Windows-specific configurations here if needed
+    }
+
     let bindings = bindgen::Builder::default()
-        .header("liblnd.h")
-        .allowlist_file("liblnd.h")
+        .header("../liblnd.h")
+        .allowlist_file("../liblnd.h")
         .generate()
         .expect("Unable to generate bindings");
 
