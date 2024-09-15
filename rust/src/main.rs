@@ -27,33 +27,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("...........................................");
     std::thread::sleep(std::time::Duration::from_secs(8));
 
-    match client.getInfo("") {
+    match client.get_info() {
         Ok(info) => {
-            println!("LND Info: {}", info);
+            println!("LND Info: {:?}", info);
         }
         Err(e) => {
             eprintln!("Error getting LND info: {}", e);
 
             std::thread::sleep(std::time::Duration::from_secs(5));
         }
-    }
-
-    // Call walletBalance
-    match client.walletBalance("") {
-        Ok(balance) => println!("Wallet Balance: {}", balance),
-        Err(e) => eprintln!("Error getting wallet balance: {}", e),
-    }
-
-    // Call listChannels
-    match client.listChannels("") {
-        Ok(channels) => println!("Channels: {}", channels),
-        Err(e) => eprintln!("Error listing channels: {}", e),
-    }
-
-    // For functions that need arguments
-    match client.addInvoice("{\"memo\":\"Test invoice\",\"value\":1000}") {
-        Ok(invoice) => println!("Invoice added: {}", invoice),
-        Err(e) => eprintln!("Error adding invoice: {}", e),
     }
 
     // Keep the main thread alive

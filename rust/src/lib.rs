@@ -11,57 +11,13 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::Once;
 use std::time::Duration;
 
+use lnd_grpc_rust::lnrpc;
+use lnd_grpc_rust::prost::Message;
+
 pub struct LndClient;
 
 static INIT: Once = Once::new();
 static mut CALLBACK: Option<CCallback> = None;
-
-macro_rules! generate_lnd_function {
-    ($func_name:ident) => {
-        pub fn $func_name(&self, args: &str) -> Result<String, String> {
-            let c_args = CString::new(args).unwrap();
-            let (tx, rx) = channel();
-
-            extern "C" fn response_callback(
-                context: *mut c_void,
-                data: *const c_char,
-                length: c_int,
-            ) {
-                let tx = unsafe { &*(context as *const Sender<Result<String, String>>) };
-                let response =
-                    unsafe { std::slice::from_raw_parts(data as *const u8, length as usize) };
-                let response_str = String::from_utf8_lossy(response).into_owned();
-                tx.send(Ok(response_str)).unwrap();
-            }
-
-            extern "C" fn error_callback(context: *mut c_void, err: *const c_char) {
-                let tx = unsafe { &*(context as *const Sender<Result<String, String>>) };
-                let error = unsafe { CStr::from_ptr(err).to_str().unwrap_or("").to_string() };
-                tx.send(Err(error)).unwrap();
-            }
-
-            let callback = CCallback {
-                onResponse: Some(response_callback),
-                onError: Some(error_callback),
-                responseContext: &tx as *const _ as *mut c_void,
-                errorContext: &tx as *const _ as *mut c_void,
-            };
-
-            unsafe {
-                $func_name(
-                    c_args.as_ptr() as *mut c_char,
-                    c_args.as_bytes().len() as c_int,
-                    callback,
-                );
-            }
-
-            match rx.recv_timeout(Duration::from_secs(30)) {
-                Ok(result) => result,
-                Err(_) => Err("Timeout waiting for response".to_string()),
-            }
-        }
-    };
-}
 
 impl LndClient {
     pub fn new() -> Self {
@@ -102,22 +58,58 @@ impl LndClient {
             INIT.call_once(|| {
                 CALLBACK = Some(callback);
             });
-            start(c_args.as_ptr() as *mut c_char, CALLBACK.unwrap());
+            let c_args_ptr = c_args.into_raw();
+            start(c_args_ptr, CALLBACK.unwrap());
+            // Retake ownership of the CString so it will be properly dropped
+            let _ = CString::from_raw(c_args_ptr);
         }
         Ok(())
     }
 
-    generate_lnd_function!(getInfo);
-    generate_lnd_function!(walletBalance);
-    generate_lnd_function!(channelBalance);
-    generate_lnd_function!(listChannels);
-    generate_lnd_function!(pendingChannels);
-    generate_lnd_function!(listPayments);
-    generate_lnd_function!(decodePayReq);
-    generate_lnd_function!(addInvoice);
-    generate_lnd_function!(lookupInvoice);
-    generate_lnd_function!(listInvoices);
-    // Add more functions here as needed
+    pub fn get_info(&self) -> Result<lnrpc::GetInfoResponse, String> {
+        let request = lnrpc::GetInfoRequest {};
+        let encoded = request.encode_to_vec();
+
+        let c_args = CString::new(encoded).unwrap();
+        let (tx, rx) = channel::<Result<Vec<u8>, String>>();
+
+        extern "C" fn response_callback(context: *mut c_void, data: *const c_char, length: c_int) {
+            let tx = unsafe { &*(context as *const Sender<Result<Vec<u8>, String>>) };
+            let response =
+                unsafe { std::slice::from_raw_parts(data as *const u8, length as usize) };
+            tx.send(Ok(response.to_vec())).unwrap();
+        }
+
+        extern "C" fn error_callback(context: *mut c_void, err: *const c_char) {
+            let tx = unsafe { &*(context as *const Sender<Result<Vec<u8>, String>>) };
+            let error = unsafe { CStr::from_ptr(err).to_str().unwrap_or("").to_string() };
+            tx.send(Err(error)).unwrap();
+        }
+
+        let callback = CCallback {
+            onResponse: Some(response_callback),
+            onError: Some(error_callback),
+            responseContext: &tx as *const _ as *mut c_void,
+            errorContext: &tx as *const _ as *mut c_void,
+        };
+
+        unsafe {
+            // Get the length before converting to raw pointer
+            let c_args_len = c_args.as_bytes().len() as c_int;
+            let c_args_ptr = c_args.into_raw();
+            getInfo(c_args_ptr, c_args_len, callback);
+            // Retake ownership of the CString so it will be properly dropped
+            let _ = CString::from_raw(c_args_ptr);
+        }
+
+        match rx.recv_timeout(Duration::from_secs(30)) {
+            Ok(result) => result.and_then(|bytes| {
+                lnrpc::GetInfoResponse::decode(bytes.as_slice())
+                    .map_err(|e| format!("Failed to decode response: {}", e))
+            }),
+            Err(_) => Err("Timeout waiting for response".to_string()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -128,31 +120,16 @@ mod tests {
     fn test_lnd_client() {
         let client = LndClient::new();
 
-        let start_args = "--lnddir=./lnd \
-            --noseedbackup \
-            --nolisten \
-            --bitcoin.active \
-            --bitcoin.regtest \
-            --bitcoin.node=neutrino \
-            --feeurl=\"https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json\" \
-            --routing.assumechanvalid \
-            --tlsdisableautofill \
-            --db.bolt.auto-compact \
-            --db.bolt.auto-compact-min-age=0 \
-            --neutrino.connect=localhost:19444";
-
         // Test start function
-        match client.start(start_args) {
+        match client.start("--lnddir=./lnd --noseedbackup") {
             Ok(()) => println!("LND started successfully"),
             Err(e) => eprintln!("Start error: {}", e),
         }
 
         // Test getInfo function
-        match client.getInfo("") {
-            Ok(info) => println!("Node info: {}", info),
+        match client.get_info() {
+            Ok(info) => println!("Node info: {:?}", info),
             Err(e) => eprintln!("GetInfo error: {}", e),
         }
-
-        // Add more tests for other functions as needed
     }
 }
