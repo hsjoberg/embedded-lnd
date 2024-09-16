@@ -16,3 +16,4 @@ bindgen = "0.60"
 
 [dependencies]
 lnd_grpc_rust = "2.7.0"
+libc = "0.2"

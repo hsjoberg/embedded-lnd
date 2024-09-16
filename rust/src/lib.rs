@@ -7,8 +7,9 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Once;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lnd_grpc_rust::lnrpc;
@@ -18,7 +19,6 @@ pub struct LndClient;
 
 static INIT: Once = Once::new();
 static mut CALLBACK: Option<CCallback> = None;
-
 impl LndClient {
     pub fn new() -> Self {
         LndClient
@@ -115,6 +115,68 @@ impl LndClient {
         }
     }
 
+    pub fn subscribe_peer_events(
+        &self,
+    ) -> Result<Receiver<Result<lnrpc::PeerEvent, String>>, String> {
+        let (tx, rx) = channel::<Result<lnrpc::PeerEvent, String>>();
+        let tx = Arc::new(Mutex::new(tx));
+
+        extern "C" fn response_callback(context: *mut c_void, data: *const c_char, length: c_int) {
+            let tx = unsafe {
+                &*(context as *const Arc<Mutex<Sender<Result<lnrpc::PeerEvent, String>>>>)
+            };
+            let response =
+                unsafe { std::slice::from_raw_parts(data as *const u8, length as usize) };
+            match lnrpc::PeerEvent::decode(response) {
+                Ok(update) => {
+                    if let Err(e) = tx.lock().unwrap().send(Ok(update)) {
+                        eprintln!("Failed to send PeerEvent: {}", e);
+                    }
+                }
+                Err(e) => {
+                    if let Err(e) = tx
+                        .lock()
+                        .unwrap()
+                        .send(Err(format!("Failed to decode response: {}", e)))
+                    {
+                        eprintln!("Failed to send error: {}", e);
+                    }
+                }
+            }
+        }
+
+        extern "C" fn error_callback(context: *mut c_void, err: *const c_char) {
+            let tx = unsafe {
+                &*(context as *const Arc<Mutex<Sender<Result<lnrpc::PeerEvent, String>>>>)
+            };
+            let error = unsafe { CStr::from_ptr(err).to_str().unwrap_or("").to_string() };
+            if let Err(e) = tx.lock().unwrap().send(Err(error)) {
+                eprintln!("Failed to send error: {}", e);
+            }
+        }
+
+        let tx_clone = Arc::clone(&tx);
+        let recv_stream = CRecvStream {
+            onResponse: Some(response_callback),
+            onError: Some(error_callback),
+            responseContext: Arc::into_raw(tx_clone) as *mut c_void,
+            errorContext: Arc::into_raw(tx) as *mut c_void,
+        };
+
+        let request = lnrpc::PeerEventSubscription {};
+        let encoded = request.encode_to_vec();
+        let c_args = CString::new(encoded).unwrap();
+
+        unsafe {
+            let c_args_len = c_args.as_bytes().len() as c_int;
+            let c_args_ptr = c_args.into_raw();
+            subscribePeerEvents(c_args_ptr, c_args_len, recv_stream);
+            let _ = CString::from_raw(c_args_ptr);
+        }
+
+        Ok(rx)
+    }
+
     pub fn get_info(
         &self,
         request: lnrpc::GetInfoRequest,
@@ -129,7 +191,12 @@ impl LndClient {
         self.call_lnd_method(request, addInvoice)
     }
 
-    // Add more methods here as needed
+    pub fn connect_peer(
+        &self,
+        request: lnrpc::ConnectPeerRequest,
+    ) -> Result<lnrpc::ConnectPeerResponse, String> {
+        self.call_lnd_method(request, connectPeer)
+    }
 }
 
 #[cfg(test)]
@@ -176,6 +243,20 @@ mod tests {
         match client.add_invoice(invoice) {
             Ok(response) => println!("Invoice added: {:?}", response),
             Err(e) => eprintln!("AddInvoice error: {}", e),
+        }
+
+        match client.connect_peer(lnrpc::ConnectPeerRequest {
+            addr: Some(lnrpc::LightningAddress {
+                pubkey: "02546bfe3778d7f8aea43224337d082bcc4521150569c94c9052413ae5b6599c2d"
+                    .to_string(),
+                host: "192.168.10.120:9735".to_string(),
+                ..Default::default()
+            }),
+            perm: true,
+            ..Default::default()
+        }) {
+            Ok(response) => println!("Peer connected: {:?}", response),
+            Err(e) => eprintln!("ConnectPeer error: {}", e),
         }
     }
 }

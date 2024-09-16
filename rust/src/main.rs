@@ -1,8 +1,10 @@
 use lnd_grpc_rust::lnrpc;
 use lnd_rust_wrapper::LndClient;
+use std::sync::Arc;
+use std::thread;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = LndClient::new();
+    let client = Arc::new(LndClient::new());
     let start_args = "--lnddir=./lnd \
         --noseedbackup \
         --nolisten \
@@ -46,12 +48,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
     match client.add_invoice(invoice) {
-        Ok(response) => println!("Invoice added: {:?}", response),
+        Ok(response) => println!("Invoice added: {:?}", response.payment_addr),
         Err(e) => eprintln!("AddInvoice error: {}", e),
     }
 
-    // Keep the main thread alive
+    let client_clone = Arc::clone(&client);
+    let _handle = thread::spawn(move || match client_clone.subscribe_peer_events() {
+        Ok(rx) => {
+            println!("Subscribed to peer events");
+            for event in rx.iter() {
+                match event {
+                    Ok(update) => println!("Received peer event: {:?}", update),
+                    Err(e) => eprintln!("Peer event error: {}", e),
+                }
+            }
+        }
+        Err(e) => eprintln!("Failed to subscribe to peer events: {}", e),
+    });
+
+    println!("reaching here");
+
     loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        match client.connect_peer(lnrpc::ConnectPeerRequest {
+            addr: Some(lnrpc::LightningAddress {
+                pubkey: "02546bfe3778d7f8aea43224337d082bcc4521150569c94c9052413ae5b6599c2d"
+                    .to_string(),
+                host: "localhost:9735".to_string(),
+                ..Default::default()
+            }),
+            perm: true,
+            ..Default::default()
+        }) {
+            Ok(response) => println!("Peer connected: {:?}", response),
+            Err(e) => eprintln!("ConnectPeer error: {}", e),
+        }
+
+        // Sleep for 3 seconds before the next iteration
+        std::thread::sleep(std::time::Duration::from_secs(3));
     }
+
+    // Keep the main thread alive
+    // loop {
+    //     std::thread::sleep(std::time::Duration::from_secs(1));
+    // }
 }
