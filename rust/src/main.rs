@@ -1,9 +1,6 @@
-use ctrlc;
 use lnd_grpc_rust::lnrpc;
 use lnd_rust_wrapper::LndClient;
-use std::sync::mpsc;
 use std::sync::Arc;
-use std::thread;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Arc::new(LndClient::new());
@@ -60,6 +57,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     println!("reaching here");
+
+    client.channel_acceptor(
+        |request_result| match request_result {
+            Ok(request) => println!("Received channel accept request: {:?}", request),
+            Err(e) => eprintln!("Channel accept error: {}", e),
+        },
+        || {
+            Some(lnrpc::ChannelAcceptResponse {
+                accept: false,
+                ..Default::default()
+            })
+        },
+    )?;
 
     let mut i = 0;
 

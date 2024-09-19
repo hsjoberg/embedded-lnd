@@ -1,8 +1,10 @@
+use libc::uintptr_t;
 use once_cell::sync::Lazy;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 use std::sync::mpsc::{channel, Receiver, Sender};
+
 use std::sync::Once;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -29,14 +31,22 @@ pub struct CRecvStream {
     pub error_context: *mut c_void,
 }
 
+#[repr(C)]
+pub struct CSendStream {
+    pub send: Option<extern "C" fn(uintptr_t, *const c_char, c_int)>,
+    pub stop: Option<extern "C" fn(uintptr_t)>,
+    pub stream_ptr: uintptr_t,
+}
+
 extern "C" {
     fn start(extra_args: *const c_char, callback: CCallback);
     fn subscribePeerEvents(data: *const c_char, length: c_int, r_stream: CRecvStream);
     fn getInfo(data: *const c_char, length: c_int, callback: CCallback);
     fn addInvoice(data: *const c_char, length: c_int, callback: CCallback);
     fn connectPeer(data: *const c_char, length: c_int, callback: CCallback);
-
+    fn channelAcceptor(r_stream: CRecvStream) -> *mut CSendStream;
 }
+
 static GLOBAL_CALLBACK: Lazy<
     Mutex<Option<Box<dyn Fn(Result<lnrpc::PeerEvent, String>) + Send + Sync>>>,
 > = Lazy::new(|| Mutex::new(None));
@@ -47,6 +57,83 @@ static mut CALLBACK: Option<CCallback> = None;
 impl LndClient {
     pub fn new() -> Self {
         LndClient
+    }
+
+    pub fn channel_acceptor<F, G>(&self, on_receive: F, on_send: G) -> Result<(), String>
+    where
+        F: Fn(Result<lnrpc::ChannelAcceptRequest, String>) + Send + Sync + 'static,
+        G: Fn() -> Option<lnrpc::ChannelAcceptResponse> + Send + Sync + 'static,
+    {
+        let on_receive = Arc::new(Mutex::new(on_receive));
+        let on_send = Arc::new(Mutex::new(on_send));
+
+        extern "C" fn response_callback(context: *mut c_void, data: *const c_char, length: c_int) {
+            let context = unsafe {
+                &*(context
+                    as *const (
+                        Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>)>>,
+                        Arc<Mutex<dyn Fn() -> Option<lnrpc::ChannelAcceptResponse>>>,
+                    ))
+            };
+            let (on_receive, on_send) = context;
+            let response =
+                unsafe { std::slice::from_raw_parts(data as *const u8, length as usize) };
+
+            match lnrpc::ChannelAcceptRequest::decode(response) {
+                Ok(request) => on_receive.lock().unwrap()(Ok(request)),
+                Err(e) => {
+                    on_receive.lock().unwrap()(Err(format!("Failed to decode request: {}", e)))
+                }
+            }
+
+            if let Some(response) = on_send.lock().unwrap()() {
+                let encoded = response.encode_to_vec();
+                // Here you would typically send the response back to LND
+                // For now, we'll just print it
+                println!("Sending response: {:?}", encoded);
+            }
+        }
+
+        extern "C" fn error_callback(context: *mut c_void, err: *const c_char) {
+            let context = unsafe {
+                &*(context
+                    as *const (
+                        Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>)>>,
+                        Arc<Mutex<dyn Fn() -> Option<lnrpc::ChannelAcceptResponse>>>,
+                    ))
+            };
+            let (on_receive, _) = context;
+            let error = unsafe {
+                CStr::from_ptr(err)
+                    .to_str()
+                    .unwrap_or("Unknown error")
+                    .to_string()
+            };
+            on_receive.lock().unwrap()(Err(error));
+        }
+
+        let context: Box<(
+            Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>)>>,
+            Arc<Mutex<dyn Fn() -> Option<lnrpc::ChannelAcceptResponse>>>,
+        )> = Box::new((on_receive, on_send));
+        let context_ptr = Box::into_raw(context);
+
+        let recv_stream = CRecvStream {
+            on_response: Some(response_callback),
+            on_error: Some(error_callback),
+            response_context: context_ptr as *mut c_void,
+            error_context: context_ptr as *mut c_void,
+        };
+
+        let send_stream = unsafe { channelAcceptor(recv_stream) };
+
+        if send_stream.is_null() {
+            // Clean up the context if channelAcceptor fails
+            unsafe { Box::from_raw(context_ptr) };
+            return Err("Failed to create send stream".to_string());
+        }
+
+        Ok(())
     }
 
     pub fn start(&self, args: &str) -> Result<(), String> {
