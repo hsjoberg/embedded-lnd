@@ -1,5 +1,7 @@
+use ctrlc;
 use lnd_grpc_rust::lnrpc;
 use lnd_rust_wrapper::LndClient;
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
@@ -28,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("...........................................");
-    std::thread::sleep(std::time::Duration::from_secs(8));
+    std::thread::sleep(std::time::Duration::from_secs(4));
 
     match client.get_info(lnrpc::GetInfoRequest {}) {
         Ok(info) => {
@@ -53,12 +55,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let client_clone = Arc::clone(&client);
-    let _handle = thread::spawn(move || match client_clone.subscribe_peer_events() {
+
+    let handle = thread::spawn(move || match client_clone.subscribe_peer_events() {
         Ok(rx) => {
             println!("Subscribed to peer events");
-            for event in rx.iter() {
+            for event in rx {
                 match event {
-                    Ok(update) => println!("Received peer event: {:?}", update),
+                    Ok(peer_event) => println!("Received peer event: {:?}", peer_event),
                     Err(e) => eprintln!("Peer event error: {}", e),
                 }
             }
@@ -67,6 +70,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     println!("reaching here");
+
+    let mut i = 0;
 
     loop {
         match client.connect_peer(lnrpc::ConnectPeerRequest {
@@ -83,12 +88,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => eprintln!("ConnectPeer error: {}", e),
         }
 
+        i = i + 1;
         // Sleep for 3 seconds before the next iteration
         std::thread::sleep(std::time::Duration::from_secs(3));
+
+        if i == 3 {
+            break;
+        }
     }
+
+    handle
+        .join()
+        .expect("Couldn't join on the associated thread");
+
+    let (tx, rx) = mpsc::channel();
+    ctrlc::set_handler(move || tx.send(()).expect("Could not send signal on channel."))
+        .expect("Error setting Ctrl-C handler");
+
+    println!("Waiting for Ctrl-C...");
+    rx.recv().expect("Could not receive from channel.");
+    println!("Got it! Exiting...");
+    Ok(())
 
     // Keep the main thread alive
     // loop {
     //     std::thread::sleep(std::time::Duration::from_secs(1));
     // }
+    //
 }

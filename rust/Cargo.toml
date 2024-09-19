@@ -15,5 +15,6 @@ path = "src/main.rs"
 bindgen = "0.60"
 
 [dependencies]
+ctrlc = "3.4.5"
 lnd_grpc_rust = "2.7.0"
 libc = "0.2"
