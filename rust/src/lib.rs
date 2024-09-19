@@ -155,24 +155,20 @@ impl LndClient {
             let tx = unsafe {
                 &*(context as *const Arc<Mutex<Sender<Result<lnrpc::PeerEvent, String>>>>)
             };
-
-            println!("logging data: {:?}", data);
-
             let response =
                 unsafe { std::slice::from_raw_parts(data as *const u8, length as usize) };
 
-            println!("logging data: {:?} {:?}", data, response);
+            println!("Received peer event data, length: {}", length);
 
             match lnrpc::PeerEvent::decode(response) {
-                Ok(update) => {
-                    println!("logging data decode OK {:?}", update);
-
-                    if let Err(e) = tx.lock().unwrap().send(Ok(update)) {
+                Ok(event) => {
+                    println!("Successfully decoded peer event: {:?}", event);
+                    if let Err(e) = tx.lock().unwrap().send(Ok(event)) {
                         eprintln!("Failed to send PeerEvent: {}", e);
                     }
                 }
                 Err(e) => {
-                    println!("logging data decode Err {:?}", e);
+                    eprintln!("Failed to decode peer event: {}", e);
                     if let Err(e) = tx
                         .lock()
                         .unwrap()
@@ -188,7 +184,13 @@ impl LndClient {
             let tx = unsafe {
                 &*(context as *const Arc<Mutex<Sender<Result<lnrpc::PeerEvent, String>>>>)
             };
-            let error = unsafe { CStr::from_ptr(err).to_str().unwrap_or("").to_string() };
+            let error = unsafe {
+                CStr::from_ptr(err)
+                    .to_str()
+                    .unwrap_or("Unknown error")
+                    .to_string()
+            };
+            eprintln!("Received error in peer event stream: {}", error);
             if let Err(e) = tx.lock().unwrap().send(Err(error)) {
                 eprintln!("Failed to send error: {}", e);
             }
@@ -212,6 +214,7 @@ impl LndClient {
             subscribePeerEvents(c_args_ptr, c_args_len, recv_stream);
         }
 
+        println!("Subscribed to peer events");
         Ok(rx)
     }
 

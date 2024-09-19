@@ -55,7 +55,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let client_clone = Arc::clone(&client);
-
     let handle = thread::spawn(move || match client_clone.subscribe_peer_events() {
         Ok(rx) => {
             println!("Subscribed to peer events");
