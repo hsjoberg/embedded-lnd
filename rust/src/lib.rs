@@ -1,3 +1,4 @@
+use once_cell::sync::Lazy;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
@@ -36,6 +37,9 @@ extern "C" {
     fn connectPeer(data: *const c_char, length: c_int, callback: CCallback);
 
 }
+static GLOBAL_CALLBACK: Lazy<
+    Mutex<Option<Box<dyn Fn(Result<lnrpc::PeerEvent, String>) + Send + Sync>>>,
+> = Lazy::new(|| Mutex::new(None));
 
 static INIT: Once = Once::new();
 static mut CALLBACK: Option<CCallback> = None;
@@ -145,45 +149,34 @@ impl LndClient {
         }
     }
 
-    pub fn subscribe_peer_events(
-        &self,
-    ) -> Result<Receiver<Result<lnrpc::PeerEvent, String>>, String> {
-        let (tx, rx) = channel::<Result<lnrpc::PeerEvent, String>>();
-        let tx = Arc::new(Mutex::new(tx));
+    pub fn subscribe_peer_events<F>(&self, callback: F)
+    where
+        F: Fn(Result<lnrpc::PeerEvent, String>) + Send + Sync + 'static,
+    {
+        *GLOBAL_CALLBACK.lock().unwrap() = Some(Box::new(callback));
 
-        extern "C" fn response_callback(context: *mut c_void, data: *const c_char, length: c_int) {
-            let tx = unsafe {
-                &*(context as *const Arc<Mutex<Sender<Result<lnrpc::PeerEvent, String>>>>)
-            };
+        extern "C" fn response_callback(_context: *mut c_void, data: *const c_char, length: c_int) {
             let response =
                 unsafe { std::slice::from_raw_parts(data as *const u8, length as usize) };
-
             println!("Received peer event data, length: {}", length);
 
             match lnrpc::PeerEvent::decode(response) {
                 Ok(event) => {
                     println!("Successfully decoded peer event: {:?}", event);
-                    if let Err(e) = tx.lock().unwrap().send(Ok(event)) {
-                        eprintln!("Failed to send PeerEvent: {}", e);
+                    if let Some(callback) = GLOBAL_CALLBACK.lock().unwrap().as_ref() {
+                        callback(Ok(event));
                     }
                 }
                 Err(e) => {
                     eprintln!("Failed to decode peer event: {}", e);
-                    if let Err(e) = tx
-                        .lock()
-                        .unwrap()
-                        .send(Err(format!("Failed to decode event: {}", e)))
-                    {
-                        eprintln!("Failed to send error: {}", e);
+                    if let Some(callback) = GLOBAL_CALLBACK.lock().unwrap().as_ref() {
+                        callback(Err(format!("Failed to decode event: {}", e)));
                     }
                 }
             }
         }
 
-        extern "C" fn error_callback(context: *mut c_void, err: *const c_char) {
-            let tx = unsafe {
-                &*(context as *const Arc<Mutex<Sender<Result<lnrpc::PeerEvent, String>>>>)
-            };
+        extern "C" fn error_callback(_context: *mut c_void, err: *const c_char) {
             let error = unsafe {
                 CStr::from_ptr(err)
                     .to_str()
@@ -191,31 +184,27 @@ impl LndClient {
                     .to_string()
             };
             eprintln!("Received error in peer event stream: {}", error);
-            if let Err(e) = tx.lock().unwrap().send(Err(error)) {
-                eprintln!("Failed to send error: {}", e);
+            if let Some(callback) = GLOBAL_CALLBACK.lock().unwrap().as_ref() {
+                callback(Err(error));
             }
         }
 
-        let tx_clone = Arc::clone(&tx);
         let recv_stream = CRecvStream {
             on_response: Some(response_callback),
             on_error: Some(error_callback),
-            response_context: Arc::into_raw(tx_clone) as *mut c_void,
-            error_context: Arc::into_raw(tx) as *mut c_void,
+            response_context: std::ptr::null_mut(),
+            error_context: std::ptr::null_mut(),
         };
 
         let request = lnrpc::PeerEventSubscription {};
         let encoded = request.encode_to_vec();
         let c_args = CString::new(encoded).unwrap();
-
         unsafe {
             let c_args_len = c_args.as_bytes().len() as c_int;
             let c_args_ptr = c_args.as_ptr();
             subscribePeerEvents(c_args_ptr, c_args_len, recv_stream);
         }
-
         println!("Subscribed to peer events");
-        Ok(rx)
     }
 
     pub fn get_info(

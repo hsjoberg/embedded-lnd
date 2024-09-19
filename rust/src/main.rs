@@ -54,18 +54,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => eprintln!("AddInvoice error: {}", e),
     }
 
-    let client_clone = Arc::clone(&client);
-    let handle = thread::spawn(move || match client_clone.subscribe_peer_events() {
-        Ok(rx) => {
-            println!("Subscribed to peer events");
-            for event in rx {
-                match event {
-                    Ok(peer_event) => println!("Received peer event: {:?}", peer_event),
-                    Err(e) => eprintln!("Peer event error: {}", e),
-                }
-            }
-        }
-        Err(e) => eprintln!("Failed to subscribe to peer events: {}", e),
+    client.subscribe_peer_events(|event_result| match event_result {
+        Ok(event) => println!("Received peer event: {:?}", event.pub_key),
+        Err(e) => eprintln!("Peer event error: {}", e),
     });
 
     println!("reaching here");
@@ -91,22 +82,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Sleep for 3 seconds before the next iteration
         std::thread::sleep(std::time::Duration::from_secs(3));
 
-        if i == 3 {
+        if i == 100 {
             break;
         }
     }
 
-    handle
-        .join()
-        .expect("Couldn't join on the associated thread");
-
-    let (tx, rx) = mpsc::channel();
-    ctrlc::set_handler(move || tx.send(()).expect("Could not send signal on channel."))
-        .expect("Error setting Ctrl-C handler");
-
-    println!("Waiting for Ctrl-C...");
-    rx.recv().expect("Could not receive from channel.");
-    println!("Got it! Exiting...");
     Ok(())
 
     // Keep the main thread alive
