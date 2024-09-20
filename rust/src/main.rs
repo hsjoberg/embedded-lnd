@@ -51,6 +51,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_invoice(invoice)
         .expect("expected to create invoice");
 
+    println!("Invoice created {:?}", invoice_response);
+
     let single_invoice_request = invoicesrpc::SubscribeSingleInvoiceRequest {
         r_hash: invoice_response.r_hash,
         ..Default::default()
@@ -78,12 +80,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Err(e) => println!("Error: {}", e),
             }
         },
-        || {
-            Some(lnrpc::ChannelAcceptResponse {
-                accept: false,
-                error: "can't accept".to_string(),
-                // Set other fields as needed
-                ..Default::default()
+        |request| {
+            request.map(|req| {
+                lnrpc::ChannelAcceptResponse {
+                    accept: false,
+                    pending_chan_id: req.pending_chan_id,
+                    error: "i won't accept your channel".to_string(),
+                    // Set other fields as needed
+                    ..Default::default()
+                }
             })
         },
     )?;

@@ -40,23 +40,32 @@ impl LndClient {
     ) -> Result<usize, String>
     where
         F: Fn(Result<lnrpc::ChannelAcceptRequest, String>) + Send + Sync + 'static,
-        G: Fn() -> Option<lnrpc::ChannelAcceptResponse> + Send + Sync + 'static,
+        G: Fn(Option<lnrpc::ChannelAcceptRequest>) -> Option<lnrpc::ChannelAcceptResponse>
+            + Send
+            + Sync
+            + 'static,
     {
-        let on_request = Arc::new(Mutex::new(on_request));
-        let get_response = Arc::new(Mutex::new(get_response));
-
         struct Context {
             on_request:
                 Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>) + Send + Sync>>,
-            get_response:
-                Arc<Mutex<dyn Fn() -> Option<lnrpc::ChannelAcceptResponse> + Send + Sync>>,
+            get_response: Arc<
+                Mutex<
+                    dyn Fn(
+                            Option<lnrpc::ChannelAcceptRequest>,
+                        ) -> Option<lnrpc::ChannelAcceptResponse>
+                        + Send
+                        + Sync,
+                >,
+            >,
             send_stream: Mutex<Option<usize>>,
+            last_request: Mutex<Option<lnrpc::ChannelAcceptRequest>>,
         }
 
         let context = Box::new(Context {
-            on_request,
-            get_response,
+            on_request: Arc::new(Mutex::new(on_request)),
+            get_response: Arc::new(Mutex::new(get_response)),
             send_stream: Mutex::new(None),
+            last_request: Mutex::new(None),
         });
         let context_ptr = Box::into_raw(context);
 
@@ -68,19 +77,13 @@ impl LndClient {
             match lnrpc::ChannelAcceptRequest::decode(request_data) {
                 Ok(request) => {
                     context.on_request.lock().unwrap()(Ok(request.clone()));
+                    *context.last_request.lock().unwrap() = Some(request.clone());
 
-                    println!("Received channel request decoding: {:?}", request);
-
-                    if let Some(response) = context.get_response.lock().unwrap()() {
-                        println!(
-                            "Received channel request response: {:?} {:?}",
-                            response,
-                            *context.send_stream.lock().unwrap()
-                        );
+                    if let Some(response) = context.get_response.lock().unwrap()(Some(request)) {
+                        println!("Sending channel request response: {:?}", response);
 
                         let encoded_response = response.encode_to_vec();
                         if let Some(send_stream) = *context.send_stream.lock().unwrap() {
-                            // Create a CString from the encoded response
                             let c_data =
                                 CString::new(encoded_response).expect("CString::new failed");
                             unsafe {
@@ -121,7 +124,6 @@ impl LndClient {
         let send_stream = unsafe { channelAcceptor(recv_stream) };
 
         if send_stream == 0 {
-            // Clean up the context if channelAcceptor fails
             unsafe { Box::from_raw(context_ptr) };
             Err("Failed to create send stream".to_string())
         } else {
@@ -288,7 +290,7 @@ impl LndClient {
             let c_args_len = c_args.as_bytes().len() as c_int;
             let c_args_ptr = c_args.into_raw();
             subscribe_func(c_args_ptr, c_args_len, recv_stream);
-            let _ = CString::from_raw(c_args_ptr);
+            // let _ = CString::from_raw(c_args_ptr);
         }
         println!("Subscribed to events");
     }
