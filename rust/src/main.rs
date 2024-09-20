@@ -46,54 +46,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         client.call_lnd_method(invoice, addInvoice)?;
     println!("Invoice created: {:?}", invoice_response);
 
+    // Subscribe to single invoice
     let single_invoice_request = invoicesrpc::SubscribeSingleInvoiceRequest {
         r_hash: invoice_response.r_hash,
         ..Default::default()
     };
-
-    client.subscribe_to_events::<lnrpc::Invoice, _, _>(
-        invoicesSubscribeSingleInvoice,
-        |event_result| match event_result {
+    client
+        .subscribe_events::<lnrpc::Invoice, invoicesrpc::SubscribeSingleInvoiceRequest>(
+            invoicesSubscribeSingleInvoice,
+        )
+        .on_event(|event_result| match event_result {
             Ok(invoice) => println!("Received invoice update: {:?}", invoice),
             Err(e) => eprintln!("Invoice subscription error: {}", e),
-        },
-        single_invoice_request,
-    )?;
+        })
+        .with_request(single_invoice_request)
+        .subscribe()?;
 
     // Subscribe to peer events
-    client.subscribe_to_events::<lnrpc::PeerEvent, _, _>(
-        subscribePeerEvents,
-        |event_result| match event_result {
+    client
+        .subscribe_events::<lnrpc::PeerEvent, lnrpc::PeerEventSubscription>(subscribePeerEvents)
+        .on_event(|event_result| match event_result {
             Ok(event) => println!("Received peer event: {:?}", event.pub_key),
             Err(e) => eprintln!("Peer event error: {}", e),
-        },
-        lnrpc::PeerEventSubscription::default(),
-    )?;
+        })
+        .with_request(lnrpc::PeerEventSubscription::default())
+        .subscribe()?;
 
     // Setup channel acceptor
-    let acceptor = client.setup_bidirectional_stream::<lnrpc::ChannelAcceptRequest, lnrpc::ChannelAcceptResponse, _, _>(
-        channelAcceptor,
-           |request_result| {
-               match request_result {
-                   Ok(request) => {
-                       println!("Received channel request: {:?}", request);
-                       // Your logic here
-                   }
-                   Err(e) => println!("Error: {}", e),
-               }
-           },
-           |request| {
-               request.map(|req| {
-                   lnrpc::ChannelAcceptResponse {
-                       accept: false,
-                       pending_chan_id: req.pending_chan_id,
-                       error: "i won't accept your channel".to_string(),
-                       // Set other fields as needed
-                       ..Default::default()
-                   }
-               })
-           },
-       )?;
+    let acceptor = client
+        .bidi_stream::<lnrpc::ChannelAcceptRequest, lnrpc::ChannelAcceptResponse>(channelAcceptor)
+        .on_request(|request_result| {
+            match request_result {
+                Ok(request) => {
+                    println!("Received channel request: {:?}", request);
+                    // Your logic here
+                }
+                Err(e) => println!("Error: {}", e),
+            }
+        })
+        .get_response(|request| {
+            request.map(|req| {
+                lnrpc::ChannelAcceptResponse {
+                    accept: false,
+                    pending_chan_id: req.pending_chan_id,
+                    error: "i won't accept your channel".to_string(),
+                    // Set other fields as needed
+                    ..Default::default()
+                }
+            })
+        })
+        .build()?;
 
     let mut i = 0;
 
@@ -123,10 +125,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.stop_stream(acceptor)?;
 
     Ok(())
-
-    // Keep the main thread alive
-    // loop {
-    //     std::thread::sleep(std::time::Duration::from_secs(1));
-    // }
-    //
 }
