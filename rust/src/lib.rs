@@ -33,32 +33,23 @@ impl LndClient {
         LndClient
     }
 
-    pub fn setup_channel_acceptor<F, G>(
+    pub fn setup_bidirectional_stream<Req, Resp, F, G>(
         &self,
         on_request: F,
         get_response: G,
+        stream_func: unsafe extern "C" fn(CRecvStream) -> usize,
     ) -> Result<usize, String>
     where
-        F: Fn(Result<lnrpc::ChannelAcceptRequest, String>) + Send + Sync + 'static,
-        G: Fn(Option<lnrpc::ChannelAcceptRequest>) -> Option<lnrpc::ChannelAcceptResponse>
-            + Send
-            + Sync
-            + 'static,
+        Req: Message + Default + Clone + 'static,
+        Resp: Message + Default + 'static,
+        F: Fn(Result<Req, String>) + Send + Sync + 'static,
+        G: Fn(Option<Req>) -> Option<Resp> + Send + Sync + 'static,
     {
-        struct Context {
-            on_request:
-                Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>) + Send + Sync>>,
-            get_response: Arc<
-                Mutex<
-                    dyn Fn(
-                            Option<lnrpc::ChannelAcceptRequest>,
-                        ) -> Option<lnrpc::ChannelAcceptResponse>
-                        + Send
-                        + Sync,
-                >,
-            >,
+        struct Context<Req, Resp> {
+            on_request: Arc<Mutex<dyn Fn(Result<Req, String>) + Send + Sync>>,
+            get_response: Arc<Mutex<dyn Fn(Option<Req>) -> Option<Resp> + Send + Sync>>,
             send_stream: Mutex<Option<usize>>,
-            last_request: Mutex<Option<lnrpc::ChannelAcceptRequest>>,
+            last_request: Mutex<Option<Req>>,
         }
 
         let context = Box::new(Context {
@@ -69,18 +60,22 @@ impl LndClient {
         });
         let context_ptr = Box::into_raw(context);
 
-        extern "C" fn request_callback(context: *mut c_void, data: *const c_char, length: c_int) {
-            let context = unsafe { &*(context as *const Context) };
+        extern "C" fn request_callback<Req: Message + Default + Clone, Resp: Message + Default>(
+            context: *mut c_void,
+            data: *const c_char,
+            length: c_int,
+        ) {
+            let context = unsafe { &*(context as *const Context<Req, Resp>) };
             let request_data =
                 unsafe { std::slice::from_raw_parts(data as *const u8, length as usize) };
 
-            match lnrpc::ChannelAcceptRequest::decode(request_data) {
+            match Req::decode(request_data) {
                 Ok(request) => {
                     context.on_request.lock().unwrap()(Ok(request.clone()));
                     *context.last_request.lock().unwrap() = Some(request.clone());
 
                     if let Some(response) = context.get_response.lock().unwrap()(Some(request)) {
-                        println!("Sending channel request response: {:?}", response);
+                        println!("Sending response: {:?}", response);
 
                         let encoded_response = response.encode_to_vec();
                         if let Some(send_stream) = *context.send_stream.lock().unwrap() {
@@ -103,8 +98,11 @@ impl LndClient {
             }
         }
 
-        extern "C" fn error_callback(context: *mut c_void, err: *const c_char) {
-            let context = unsafe { &*(context as *const Context) };
+        extern "C" fn error_callback<Req: Message + Default + Clone, Resp: Message + Default>(
+            context: *mut c_void,
+            err: *const c_char,
+        ) {
+            let context = unsafe { &*(context as *const Context<Req, Resp>) };
             let error = unsafe {
                 CStr::from_ptr(err)
                     .to_str()
@@ -115,16 +113,18 @@ impl LndClient {
         }
 
         let recv_stream = CRecvStream {
-            onResponse: Some(request_callback),
-            onError: Some(error_callback),
+            onResponse: Some(request_callback::<Req, Resp>),
+            onError: Some(error_callback::<Req, Resp>),
             responseContext: context_ptr as *mut c_void,
             errorContext: context_ptr as *mut c_void,
         };
 
-        let send_stream = unsafe { channelAcceptor(recv_stream) };
+        let send_stream = unsafe { stream_func(recv_stream) };
 
         if send_stream == 0 {
-            unsafe { Box::from_raw(context_ptr) };
+            unsafe {
+                let _ = Box::from_raw(context_ptr);
+            };
             Err("Failed to create send stream".to_string())
         } else {
             unsafe {
@@ -137,7 +137,6 @@ impl LndClient {
             Ok(send_stream)
         }
     }
-
     pub fn start(&self, args: &str) -> Result<(), String> {
         let c_args = CString::new(args).unwrap();
 
@@ -349,6 +348,25 @@ impl LndClient {
             callback,
             request,
         );
+    }
+
+    pub fn setup_channel_acceptor<F, G>(
+        &self,
+        on_request: F,
+        get_response: G,
+    ) -> Result<usize, String>
+    where
+        F: Fn(Result<lnrpc::ChannelAcceptRequest, String>) + Send + Sync + 'static,
+        G: Fn(Option<lnrpc::ChannelAcceptRequest>) -> Option<lnrpc::ChannelAcceptResponse>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.setup_bidirectional_stream::<lnrpc::ChannelAcceptRequest, lnrpc::ChannelAcceptResponse, F, G>(
+               on_request,
+               get_response,
+               channelAcceptor,
+           )
     }
 }
 
