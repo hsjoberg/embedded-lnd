@@ -1,4 +1,4 @@
-use lnd_grpc_rust::lnrpc;
+use lnd_grpc_rust::{invoicesrpc, lnrpc};
 use lnd_rust_wrapper::LndClient;
 use std::sync::Arc;
 
@@ -46,10 +46,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         value: 1000,
         ..Default::default()
     };
-    match client.add_invoice(invoice) {
-        Ok(response) => println!("Invoice added: {:?}", response.payment_addr),
-        Err(e) => eprintln!("AddInvoice error: {}", e),
-    }
+
+    let invoice_response = client
+        .add_invoice(invoice)
+        .expect("expected to create invoice");
+
+    let single_invoice_request = invoicesrpc::SubscribeSingleInvoiceRequest {
+        r_hash: invoice_response.r_hash,
+        ..Default::default()
+    };
+
+    client.subscribe_single_invoice(single_invoice_request, |event_result| match event_result {
+        Ok(invoice) => println!("Received invoice update: {:?}", invoice),
+        Err(e) => eprintln!("Invoice subscription error: {}", e),
+    });
 
     client.subscribe_peer_events(|event_result| match event_result {
         Ok(event) => println!("Received peer event: {:?}", event.pub_key),
