@@ -35,9 +35,9 @@ impl LndClient {
 
     pub fn setup_bidirectional_stream<Req, Resp, F, G>(
         &self,
+        stream_func: unsafe extern "C" fn(CRecvStream) -> usize,
         on_request: F,
         get_response: G,
-        stream_func: unsafe extern "C" fn(CRecvStream) -> usize,
     ) -> Result<usize, String>
     where
         Req: Message + Default + Clone + 'static,
@@ -243,7 +243,8 @@ impl LndClient {
         subscribe_func: unsafe extern "C" fn(*mut c_char, c_int, CRecvStream) -> (),
         callback: F,
         request: R,
-    ) where
+    ) -> Result<(), String>
+    where
         E: Message + Default + 'static,
         F: Fn(Result<E, String>) + Send + Sync + 'static,
         R: Message,
@@ -299,74 +300,10 @@ impl LndClient {
             let c_args_len = c_args.as_bytes().len() as c_int;
             let c_args_ptr = c_args.into_raw();
             subscribe_func(c_args_ptr, c_args_len, recv_stream);
-            // let _ = CString::from_raw(c_args_ptr);
+            let _ = CString::from_raw(c_args_ptr);
         }
         println!("Subscribed to events");
-    }
-
-    pub fn get_info(
-        &self,
-        request: lnrpc::GetInfoRequest,
-    ) -> Result<lnrpc::GetInfoResponse, String> {
-        self.call_lnd_method(request, getInfo)
-    }
-
-    pub fn add_invoice(
-        &self,
-        request: lnrpc::Invoice,
-    ) -> Result<lnrpc::AddInvoiceResponse, String> {
-        self.call_lnd_method(request, addInvoice)
-    }
-
-    pub fn connect_peer(
-        &self,
-        request: lnrpc::ConnectPeerRequest,
-    ) -> Result<lnrpc::ConnectPeerResponse, String> {
-        self.call_lnd_method(request, connectPeer)
-    }
-
-    pub fn subscribe_peer_events<F>(&self, callback: F)
-    where
-        F: Fn(Result<lnrpc::PeerEvent, String>) + Send + Sync + 'static,
-    {
-        self.subscribe_to_events::<lnrpc::PeerEvent, F, _>(
-            subscribePeerEvents,
-            callback,
-            lnrpc::PeerEventSubscription::default(),
-        );
-    }
-
-    pub fn subscribe_single_invoice<F>(
-        &self,
-        request: invoicesrpc::SubscribeSingleInvoiceRequest,
-        callback: F,
-    ) where
-        F: Fn(Result<lnrpc::Invoice, String>) + Send + Sync + 'static,
-    {
-        self.subscribe_to_events::<lnrpc::Invoice, F, _>(
-            invoicesSubscribeSingleInvoice,
-            callback,
-            request,
-        );
-    }
-
-    pub fn setup_channel_acceptor<F, G>(
-        &self,
-        on_request: F,
-        get_response: G,
-    ) -> Result<usize, String>
-    where
-        F: Fn(Result<lnrpc::ChannelAcceptRequest, String>) + Send + Sync + 'static,
-        G: Fn(Option<lnrpc::ChannelAcceptRequest>) -> Option<lnrpc::ChannelAcceptResponse>
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.setup_bidirectional_stream::<lnrpc::ChannelAcceptRequest, lnrpc::ChannelAcceptResponse, F, G>(
-               on_request,
-               get_response,
-               channelAcceptor,
-           )
+        Ok(())
     }
 }
 

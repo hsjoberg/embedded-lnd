@@ -1,5 +1,8 @@
+use embedded_lnd::{
+    addInvoice, channelAcceptor, connectPeer, getInfo, invoicesSubscribeSingleInvoice,
+    subscribePeerEvents, LndClient,
+};
 use lnd_grpc_rust::{invoicesrpc, lnrpc};
-use lnd_rust_wrapper::LndClient;
 use std::sync::Arc;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -29,86 +32,84 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("...........................................");
     std::thread::sleep(std::time::Duration::from_secs(4));
 
-    match client.get_info(lnrpc::GetInfoRequest {}) {
-        Ok(info) => {
-            println!("LND Info: {:?}", info);
-        }
-        Err(e) => {
-            eprintln!("Error getting LND info: {}", e);
+    let info: lnrpc::GetInfoResponse = client.call_lnd_method(lnrpc::GetInfoRequest {}, getInfo)?;
 
-            std::thread::sleep(std::time::Duration::from_secs(5));
-        }
-    }
+    println!("Getinfo response {:?}", info);
 
-    // Test addInvoice function
     let invoice = lnrpc::Invoice {
         memo: "test invoice".to_string(),
         value: 1000,
         ..Default::default()
     };
 
-    let invoice_response = client
-        .add_invoice(invoice)
-        .expect("expected to create invoice");
-
-    println!("Invoice created {:?}", invoice_response);
+    let invoice_response: lnrpc::AddInvoiceResponse =
+        client.call_lnd_method(invoice, addInvoice)?;
+    println!("Invoice created: {:?}", invoice_response);
 
     let single_invoice_request = invoicesrpc::SubscribeSingleInvoiceRequest {
         r_hash: invoice_response.r_hash,
         ..Default::default()
     };
 
-    client.subscribe_single_invoice(single_invoice_request, |event_result| match event_result {
-        Ok(invoice) => println!("Received invoice update: {:?}", invoice),
-        Err(e) => eprintln!("Invoice subscription error: {}", e),
-    });
-
-    client.subscribe_peer_events(|event_result| match event_result {
-        Ok(event) => println!("Received peer event: {:?}", event.pub_key),
-        Err(e) => eprintln!("Peer event error: {}", e),
-    });
-
-    println!("reaching here");
-
-    let acceptor = client.setup_channel_acceptor(
-        |request_result| {
-            match request_result {
-                Ok(request) => {
-                    println!("Received channel request: {:?}", request);
-                    // Your logic here
-                }
-                Err(e) => println!("Error: {}", e),
-            }
+    client.subscribe_to_events::<lnrpc::Invoice, _, _>(
+        invoicesSubscribeSingleInvoice,
+        |event_result| match event_result {
+            Ok(invoice) => println!("Received invoice update: {:?}", invoice),
+            Err(e) => eprintln!("Invoice subscription error: {}", e),
         },
-        |request| {
-            request.map(|req| {
-                lnrpc::ChannelAcceptResponse {
-                    accept: false,
-                    pending_chan_id: req.pending_chan_id,
-                    error: "i won't accept your channel".to_string(),
-                    // Set other fields as needed
-                    ..Default::default()
-                }
-            })
-        },
+        single_invoice_request,
     )?;
+
+    // Subscribe to peer events
+    client.subscribe_to_events::<lnrpc::PeerEvent, _, _>(
+        subscribePeerEvents,
+        |event_result| match event_result {
+            Ok(event) => println!("Received peer event: {:?}", event.pub_key),
+            Err(e) => eprintln!("Peer event error: {}", e),
+        },
+        lnrpc::PeerEventSubscription::default(),
+    )?;
+
+    // Setup channel acceptor
+    let acceptor = client.setup_bidirectional_stream::<lnrpc::ChannelAcceptRequest, lnrpc::ChannelAcceptResponse, _, _>(
+        channelAcceptor,
+           |request_result| {
+               match request_result {
+                   Ok(request) => {
+                       println!("Received channel request: {:?}", request);
+                       // Your logic here
+                   }
+                   Err(e) => println!("Error: {}", e),
+               }
+           },
+           |request| {
+               request.map(|req| {
+                   lnrpc::ChannelAcceptResponse {
+                       accept: false,
+                       pending_chan_id: req.pending_chan_id,
+                       error: "i won't accept your channel".to_string(),
+                       // Set other fields as needed
+                       ..Default::default()
+                   }
+               })
+           },
+       )?;
 
     let mut i = 0;
 
     loop {
-        match client.connect_peer(lnrpc::ConnectPeerRequest {
+        let connect_request = lnrpc::ConnectPeerRequest {
             addr: Some(lnrpc::LightningAddress {
                 pubkey: "02546bfe3778d7f8aea43224337d082bcc4521150569c94c9052413ae5b6599c2d"
                     .to_string(),
                 host: "localhost:9735".to_string(),
-                ..Default::default()
             }),
             perm: true,
-            ..Default::default()
-        }) {
-            Ok(response) => println!("Peer connected: {:?}", response),
-            Err(e) => eprintln!("ConnectPeer error: {}", e),
-        }
+            timeout: 60,
+        };
+        let connect_response: Result<lnrpc::ConnectPeerResponse, String> =
+            client.call_lnd_method(connect_request, connectPeer);
+        println!("Peer connection result: {:?}", connect_response);
 
         i = i + 1;
         // Sleep for 3 seconds before the next iteration
