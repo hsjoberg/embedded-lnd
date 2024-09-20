@@ -58,18 +58,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("reaching here");
 
-    client.channel_acceptor(
-        |request_result| match request_result {
-            Ok(request) => println!("Received channel accept request: {:?}", request),
-            Err(e) => eprintln!("Channel accept error: {}", e),
-        },
-        || {
-            Some(lnrpc::ChannelAcceptResponse {
-                accept: false,
-                ..Default::default()
-            })
-        },
-    )?;
+    // client.channel_acceptor(
+    //     |request_result| match request_result {
+    //         Ok(request) => {
+    //             println!("Received channel accept request: {:?}", request);
+    //             // Your logic to decide whether to accept or reject
+    //             request.funding_amt >= 1_000_000 // Example: accept if funding amount is at least 0.01 BTC
+    //         }
+    //         Err(e) => {
+    //             eprintln!("Channel accept error: {}", e);
+    //             false
+    //         }
+    //     },
+    //     |accept| {
+    //         Some(lnrpc::ChannelAcceptResponse {
+    //             accept,
+    //             // Set other fields as needed
+    //             ..Default::default()
+    //         })
+    //     },
+    // )?;
 
     let mut i = 0;
 

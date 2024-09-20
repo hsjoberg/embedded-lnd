@@ -1,51 +1,23 @@
-use libc::uintptr_t;
+#![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
+
+include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+
 use once_cell::sync::Lazy;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Sender};
 
+use std::sync::Mutex;
 use std::sync::Once;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lnd_grpc_rust::lnrpc;
 use lnd_grpc_rust::prost::Message;
 
 pub struct LndClient;
-
-#[repr(C)]
-#[derive(Clone)]
-pub struct CCallback {
-    pub on_response: Option<extern "C" fn(*mut c_void, *const c_char, c_int)>,
-    pub on_error: Option<extern "C" fn(*mut c_void, *const c_char)>,
-    pub response_context: *mut c_void,
-    pub error_context: *mut c_void,
-}
-
-#[repr(C)]
-pub struct CRecvStream {
-    pub on_response: Option<extern "C" fn(*mut c_void, *const c_char, c_int)>,
-    pub on_error: Option<extern "C" fn(*mut c_void, *const c_char)>,
-    pub response_context: *mut c_void,
-    pub error_context: *mut c_void,
-}
-
-#[repr(C)]
-pub struct CSendStream {
-    pub send: Option<extern "C" fn(uintptr_t, *const c_char, c_int)>,
-    pub stop: Option<extern "C" fn(uintptr_t)>,
-    pub stream_ptr: uintptr_t,
-}
-
-extern "C" {
-    fn start(extra_args: *const c_char, callback: CCallback);
-    fn subscribePeerEvents(data: *const c_char, length: c_int, r_stream: CRecvStream);
-    fn getInfo(data: *const c_char, length: c_int, callback: CCallback);
-    fn addInvoice(data: *const c_char, length: c_int, callback: CCallback);
-    fn connectPeer(data: *const c_char, length: c_int, callback: CCallback);
-    fn channelAcceptor(r_stream: CRecvStream) -> *mut CSendStream;
-}
 
 static GLOBAL_CALLBACK: Lazy<
     Mutex<Option<Box<dyn Fn(Result<lnrpc::PeerEvent, String>) + Send + Sync>>>,
@@ -59,85 +31,85 @@ impl LndClient {
         LndClient
     }
 
-    pub fn channel_acceptor<F, G>(&self, on_receive: F, on_send: G) -> Result<(), String>
-    where
-        F: Fn(Result<lnrpc::ChannelAcceptRequest, String>) + Send + Sync + 'static,
-        G: Fn() -> Option<lnrpc::ChannelAcceptResponse> + Send + Sync + 'static,
-    {
-        let on_receive = Arc::new(Mutex::new(on_receive));
-        let on_send = Arc::new(Mutex::new(on_send));
+    // pub fn channel_acceptor<F, G>(&self, on_receive: F, on_send: G) -> Result<(), String>
+    // where
+    //     F: Fn(Result<lnrpc::ChannelAcceptRequest, String>) + Send + Sync + 'static,
+    //     G: Fn() -> Option<lnrpc::ChannelAcceptResponse> + Send + Sync + 'static,
+    // {
+    //     let on_receive = Arc::new(Mutex::new(on_receive));
+    //     let on_send = Arc::new(Mutex::new(on_send));
 
-        extern "C" fn response_callback(context: *mut c_void, data: *const c_char, length: c_int) {
-            let context = unsafe {
-                &*(context
-                    as *const (
-                        Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>)>>,
-                        Arc<Mutex<dyn Fn() -> Option<lnrpc::ChannelAcceptResponse>>>,
-                    ))
-            };
-            let (on_receive, on_send) = context;
-            let response =
-                unsafe { std::slice::from_raw_parts(data as *const u8, length as usize) };
+    //     extern "C" fn response_callback(context: *mut c_void, data: *const c_char, length: c_int) {
+    //         let context = unsafe {
+    //             &*(context
+    //                 as *const (
+    //                     Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>)>>,
+    //                     Arc<Mutex<dyn Fn() -> Option<lnrpc::ChannelAcceptResponse>>>,
+    //                 ))
+    //         };
+    //         let (on_receive, on_send) = context;
+    //         let response =
+    //             unsafe { std::slice::from_raw_parts(data as *const u8, length as usize) };
 
-            match lnrpc::ChannelAcceptRequest::decode(response) {
-                Ok(request) => on_receive.lock().unwrap()(Ok(request)),
-                Err(e) => {
-                    on_receive.lock().unwrap()(Err(format!("Failed to decode request: {}", e)))
-                }
-            }
+    //         match lnrpc::ChannelAcceptRequest::decode(response) {
+    //             Ok(request) => on_receive.lock().unwrap()(Ok(request)),
+    //             Err(e) => {
+    //                 on_receive.lock().unwrap()(Err(format!("Failed to decode request: {}", e)))
+    //             }
+    //         }
 
-            if let Some(response) = on_send.lock().unwrap()() {
-                let encoded = response.encode_to_vec();
-                // Here you would typically send the response back to LND
-                // For now, we'll just print it
-                println!("Sending response: {:?}", encoded);
-            }
-        }
+    //         if let Some(response) = on_send.lock().unwrap()() {
+    //             let encoded = response.encode_to_vec();
+    //             // Here you would typically send the response back to LND
+    //             // For now, we'll just print it
+    //             println!("Sending response: {:?}", encoded);
+    //         }
+    //     }
 
-        extern "C" fn error_callback(context: *mut c_void, err: *const c_char) {
-            let context = unsafe {
-                &*(context
-                    as *const (
-                        Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>)>>,
-                        Arc<Mutex<dyn Fn() -> Option<lnrpc::ChannelAcceptResponse>>>,
-                    ))
-            };
-            let (on_receive, _) = context;
-            let error = unsafe {
-                CStr::from_ptr(err)
-                    .to_str()
-                    .unwrap_or("Unknown error")
-                    .to_string()
-            };
-            on_receive.lock().unwrap()(Err(error));
-        }
+    //     extern "C" fn error_callback(context: *mut c_void, err: *const c_char) {
+    //         let context = unsafe {
+    //             &*(context
+    //                 as *const (
+    //                     Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>)>>,
+    //                     Arc<Mutex<dyn Fn() -> Option<lnrpc::ChannelAcceptResponse>>>,
+    //                 ))
+    //         };
+    //         let (on_receive, _) = context;
+    //         let error = unsafe {
+    //             CStr::from_ptr(err)
+    //                 .to_str()
+    //                 .unwrap_or("Unknown error")
+    //                 .to_string()
+    //         };
+    //         on_receive.lock().unwrap()(Err(error));
+    //     }
 
-        let context: Box<(
-            Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>)>>,
-            Arc<Mutex<dyn Fn() -> Option<lnrpc::ChannelAcceptResponse>>>,
-        )> = Box::new((on_receive, on_send));
-        let context_ptr = Box::into_raw(context);
+    //     let context: Box<(
+    //         Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>)>>,
+    //         Arc<Mutex<dyn Fn() -> Option<lnrpc::ChannelAcceptResponse>>>,
+    //     )> = Box::new((on_receive, on_send));
+    //     let context_ptr = Box::into_raw(context);
 
-        let recv_stream = CRecvStream {
-            on_response: Some(response_callback),
-            on_error: Some(error_callback),
-            response_context: context_ptr as *mut c_void,
-            error_context: context_ptr as *mut c_void,
-        };
+    //     let recv_stream = CRecvStream {
+    //         on_response: Some(response_callback),
+    //         on_error: Some(error_callback),
+    //         response_context: context_ptr as *mut c_void,
+    //         error_context: context_ptr as *mut c_void,
+    //     };
 
-        let send_stream = unsafe { channelAcceptor(recv_stream) };
+    //     let send_stream = unsafe { channelAcceptor(recv_stream) };
 
-        if send_stream.is_null() {
-            // Clean up the context if channelAcceptor fails
-            unsafe { Box::from_raw(context_ptr) };
-            return Err("Failed to create send stream".to_string());
-        }
+    //     if send_stream.is_null() {
+    //         // Clean up the context if channelAcceptor fails
+    //         unsafe { Box::from_raw(context_ptr) };
+    //         return Err("Failed to create send stream".to_string());
+    //     }
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     pub fn start(&self, args: &str) -> Result<(), String> {
-        let c_args = CString::new(args).map_err(|e| format!("Failed to create CString: {}", e))?;
+        let c_args = CString::new(args).unwrap();
 
         extern "C" fn response_callback(
             _context: *mut c_void,
@@ -145,53 +117,43 @@ impl LndClient {
             _length: c_int,
         ) {
             unsafe {
-                if !data.is_null() {
-                    let response = CStr::from_ptr(data).to_string_lossy().into_owned();
-                    println!("Start Response: {}", response);
-                } else {
-                    eprintln!("Received null data in response");
-                }
+                println!("Start response callback invoked");
+                let response = CStr::from_ptr(data).to_string_lossy().into_owned();
+                println!("Start Response: {}", response);
             }
         }
 
         extern "C" fn error_callback(_context: *mut c_void, error: *const c_char) {
             unsafe {
-                if !error.is_null() {
-                    let error_str = CStr::from_ptr(error).to_string_lossy().into_owned();
-                    eprintln!("Start Error: {}", error_str);
-                } else {
-                    eprintln!("Received null error pointer");
-                }
+                println!("Start error callback invoked");
+                let error_str = CStr::from_ptr(error).to_string_lossy().into_owned();
+                eprintln!("Start Error: {}", error_str);
             }
         }
 
         let callback = CCallback {
-            on_response: Some(response_callback),
-            on_error: Some(error_callback),
-            response_context: ptr::null_mut(),
-            error_context: ptr::null_mut(),
+            onResponse: Some(response_callback),
+            onError: Some(error_callback),
+            responseContext: ptr::null_mut(),
+            errorContext: ptr::null_mut(),
         };
 
         unsafe {
             INIT.call_once(|| {
-                CALLBACK = Some(callback.clone());
+                CALLBACK = Some(callback);
             });
-
-            let c_args_ptr = c_args.as_ptr();
-            if let Some(ref cb) = CALLBACK {
-                start(c_args_ptr, cb.clone());
-            } else {
-                return Err("Callback not initialized".to_string());
-            }
+            let c_args_ptr = c_args.into_raw();
+            start(c_args_ptr, CALLBACK.unwrap());
+            // Retake ownership of the CString so it will be properly dropped
+            let _ = CString::from_raw(c_args_ptr);
         }
-
         Ok(())
     }
 
     pub fn call_lnd_method<Req, Resp>(
         &self,
         request: Req,
-        lnd_func: unsafe extern "C" fn(*const c_char, c_int, CCallback),
+        lnd_func: unsafe extern "C" fn(*mut c_char, c_int, CCallback) -> (),
     ) -> Result<Resp, String>
     where
         Req: Message,
@@ -215,16 +177,17 @@ impl LndClient {
         }
 
         let callback = CCallback {
-            on_response: Some(response_callback),
-            on_error: Some(error_callback),
-            response_context: &tx as *const _ as *mut c_void,
-            error_context: &tx as *const _ as *mut c_void,
+            onResponse: Some(response_callback),
+            onError: Some(error_callback),
+            responseContext: &tx as *const _ as *mut c_void,
+            errorContext: &tx as *const _ as *mut c_void,
         };
 
         unsafe {
             let c_args_len = c_args.as_bytes().len() as c_int;
-            let c_args_ptr = c_args.as_ptr();
+            let c_args_ptr = c_args.into_raw();
             lnd_func(c_args_ptr, c_args_len, callback);
+            let _ = CString::from_raw(c_args_ptr);
         }
 
         match rx.recv_timeout(Duration::from_secs(30)) {
@@ -277,10 +240,10 @@ impl LndClient {
         }
 
         let recv_stream = CRecvStream {
-            on_response: Some(response_callback),
-            on_error: Some(error_callback),
-            response_context: std::ptr::null_mut(),
-            error_context: std::ptr::null_mut(),
+            onResponse: Some(response_callback),
+            onError: Some(error_callback),
+            responseContext: std::ptr::null_mut(),
+            errorContext: std::ptr::null_mut(),
         };
 
         let request = lnrpc::PeerEventSubscription {};
@@ -288,7 +251,7 @@ impl LndClient {
         let c_args = CString::new(encoded).unwrap();
         unsafe {
             let c_args_len = c_args.as_bytes().len() as c_int;
-            let c_args_ptr = c_args.as_ptr();
+            let c_args_ptr = c_args.into_raw();
             subscribePeerEvents(c_args_ptr, c_args_len, recv_stream);
         }
         println!("Subscribed to peer events");
