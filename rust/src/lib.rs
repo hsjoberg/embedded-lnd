@@ -10,8 +10,8 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 use std::sync::mpsc::{channel, Sender};
 
-use std::sync::Mutex;
 use std::sync::Once;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lnd_grpc_rust::lnrpc;
@@ -31,82 +31,108 @@ impl LndClient {
         LndClient
     }
 
-    // pub fn channel_acceptor<F, G>(&self, on_receive: F, on_send: G) -> Result<(), String>
-    // where
-    //     F: Fn(Result<lnrpc::ChannelAcceptRequest, String>) + Send + Sync + 'static,
-    //     G: Fn() -> Option<lnrpc::ChannelAcceptResponse> + Send + Sync + 'static,
-    // {
-    //     let on_receive = Arc::new(Mutex::new(on_receive));
-    //     let on_send = Arc::new(Mutex::new(on_send));
+    pub fn setup_channel_acceptor<F, G>(
+        &self,
+        on_request: F,
+        get_response: G,
+    ) -> Result<usize, String>
+    where
+        F: Fn(Result<lnrpc::ChannelAcceptRequest, String>) + Send + Sync + 'static,
+        G: Fn() -> Option<lnrpc::ChannelAcceptResponse> + Send + Sync + 'static,
+    {
+        let on_request = Arc::new(Mutex::new(on_request));
+        let get_response = Arc::new(Mutex::new(get_response));
 
-    //     extern "C" fn response_callback(context: *mut c_void, data: *const c_char, length: c_int) {
-    //         let context = unsafe {
-    //             &*(context
-    //                 as *const (
-    //                     Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>)>>,
-    //                     Arc<Mutex<dyn Fn() -> Option<lnrpc::ChannelAcceptResponse>>>,
-    //                 ))
-    //         };
-    //         let (on_receive, on_send) = context;
-    //         let response =
-    //             unsafe { std::slice::from_raw_parts(data as *const u8, length as usize) };
+        struct Context {
+            on_request:
+                Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>) + Send + Sync>>,
+            get_response:
+                Arc<Mutex<dyn Fn() -> Option<lnrpc::ChannelAcceptResponse> + Send + Sync>>,
+            send_stream: Mutex<Option<usize>>,
+        }
 
-    //         match lnrpc::ChannelAcceptRequest::decode(response) {
-    //             Ok(request) => on_receive.lock().unwrap()(Ok(request)),
-    //             Err(e) => {
-    //                 on_receive.lock().unwrap()(Err(format!("Failed to decode request: {}", e)))
-    //             }
-    //         }
+        let context = Box::new(Context {
+            on_request,
+            get_response,
+            send_stream: Mutex::new(None),
+        });
+        let context_ptr = Box::into_raw(context);
 
-    //         if let Some(response) = on_send.lock().unwrap()() {
-    //             let encoded = response.encode_to_vec();
-    //             // Here you would typically send the response back to LND
-    //             // For now, we'll just print it
-    //             println!("Sending response: {:?}", encoded);
-    //         }
-    //     }
+        extern "C" fn request_callback(context: *mut c_void, data: *const c_char, length: c_int) {
+            let context = unsafe { &*(context as *const Context) };
+            let request_data =
+                unsafe { std::slice::from_raw_parts(data as *const u8, length as usize) };
 
-    //     extern "C" fn error_callback(context: *mut c_void, err: *const c_char) {
-    //         let context = unsafe {
-    //             &*(context
-    //                 as *const (
-    //                     Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>)>>,
-    //                     Arc<Mutex<dyn Fn() -> Option<lnrpc::ChannelAcceptResponse>>>,
-    //                 ))
-    //         };
-    //         let (on_receive, _) = context;
-    //         let error = unsafe {
-    //             CStr::from_ptr(err)
-    //                 .to_str()
-    //                 .unwrap_or("Unknown error")
-    //                 .to_string()
-    //         };
-    //         on_receive.lock().unwrap()(Err(error));
-    //     }
+            match lnrpc::ChannelAcceptRequest::decode(request_data) {
+                Ok(request) => {
+                    context.on_request.lock().unwrap()(Ok(request.clone()));
 
-    //     let context: Box<(
-    //         Arc<Mutex<dyn Fn(Result<lnrpc::ChannelAcceptRequest, String>)>>,
-    //         Arc<Mutex<dyn Fn() -> Option<lnrpc::ChannelAcceptResponse>>>,
-    //     )> = Box::new((on_receive, on_send));
-    //     let context_ptr = Box::into_raw(context);
+                    println!("Received channel request decoding: {:?}", request);
 
-    //     let recv_stream = CRecvStream {
-    //         on_response: Some(response_callback),
-    //         on_error: Some(error_callback),
-    //         response_context: context_ptr as *mut c_void,
-    //         error_context: context_ptr as *mut c_void,
-    //     };
+                    if let Some(response) = context.get_response.lock().unwrap()() {
+                        println!(
+                            "Received channel request response: {:?} {:?}",
+                            response,
+                            *context.send_stream.lock().unwrap()
+                        );
 
-    //     let send_stream = unsafe { channelAcceptor(recv_stream) };
+                        let encoded_response = response.encode_to_vec();
+                        if let Some(send_stream) = *context.send_stream.lock().unwrap() {
+                            // Create a CString from the encoded response
+                            let c_data =
+                                CString::new(encoded_response).expect("CString::new failed");
+                            unsafe {
+                                SendStreamC(
+                                    send_stream,
+                                    c_data.clone().into_raw(),
+                                    c_data.as_bytes().len() as c_int,
+                                )
+                            };
+                        }
+                    }
+                }
+                Err(e) => context.on_request.lock().unwrap()(Err(format!(
+                    "Failed to decode request: {}",
+                    e
+                ))),
+            }
+        }
 
-    //     if send_stream.is_null() {
-    //         // Clean up the context if channelAcceptor fails
-    //         unsafe { Box::from_raw(context_ptr) };
-    //         return Err("Failed to create send stream".to_string());
-    //     }
+        extern "C" fn error_callback(context: *mut c_void, err: *const c_char) {
+            let context = unsafe { &*(context as *const Context) };
+            let error = unsafe {
+                CStr::from_ptr(err)
+                    .to_str()
+                    .unwrap_or("Unknown error")
+                    .to_string()
+            };
+            context.on_request.lock().unwrap()(Err(error));
+        }
 
-    //     Ok(())
-    // }
+        let recv_stream = CRecvStream {
+            onResponse: Some(request_callback),
+            onError: Some(error_callback),
+            responseContext: context_ptr as *mut c_void,
+            errorContext: context_ptr as *mut c_void,
+        };
+
+        let send_stream = unsafe { channelAcceptor(recv_stream) };
+
+        if send_stream == 0 {
+            // Clean up the context if channelAcceptor fails
+            unsafe { Box::from_raw(context_ptr) };
+            Err("Failed to create send stream".to_string())
+        } else {
+            unsafe {
+                (*context_ptr)
+                    .send_stream
+                    .lock()
+                    .unwrap()
+                    .replace(send_stream);
+            }
+            Ok(send_stream)
+        }
+    }
 
     pub fn start(&self, args: &str) -> Result<(), String> {
         let c_args = CString::new(args).unwrap();
