@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("reaching here");
 
-    client.setup_channel_acceptor(
+    let acceptor = client.setup_channel_acceptor(
         |request_result| {
             match request_result {
                 Ok(request) => {
@@ -114,10 +114,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Sleep for 3 seconds before the next iteration
         std::thread::sleep(std::time::Duration::from_secs(3));
 
-        if i == 100 {
+        if i == 3 {
             break;
         }
     }
+
+    client.stop_stream(acceptor)?;
 
     Ok(())
 

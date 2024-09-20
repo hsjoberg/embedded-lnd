@@ -180,6 +180,16 @@ impl LndClient {
         Ok(())
     }
 
+    pub fn stop_stream(&self, stream_ptr: usize) -> Result<(), String> {
+        let result = unsafe { StopStreamC(stream_ptr) };
+        if result == 0 {
+            println!("Stopping bidi streaming...");
+            Ok(())
+        } else {
+            Err(format!("Failed to stop stream. Error code: {}", result))
+        }
+    }
+
     pub fn call_lnd_method<Req, Resp>(
         &self,
         request: Req,
