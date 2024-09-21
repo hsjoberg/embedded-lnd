@@ -117,7 +117,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Sleep for 3 seconds before the next iteration
         std::thread::sleep(std::time::Duration::from_secs(3));
 
-        if i == 3 {
+        if i == 100 {
             break;
         }
     }

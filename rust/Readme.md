@@ -1,6 +1,11 @@
-# embedded-lnd
+# embedded-lnd 🦀
 
-`embedded-lnd` is a Rust library that provides a high-level, safe interface for interacting with an embedded LND (Lightning Network Daemon) node. It allows developers to easily integrate Lightning Network functionality into their Rust applications.
+
+- `embedded-lnd` is a Rust library that provides a high-level, safe interface for interacting with an embedded LND node.
+- You can compile LND using CGO for Linux, MacOS and Windows and embed it into your application and interact with it.
+- At compile time, `build.rs` takes the `liblnd.h` file and generates a `bindings.rs` file for Rust <-> C FFI.
+- You can then import protobuf types and LND grpc methods from the library and just call them.
+- Refer to [LND API](https://lightning.engineering/api-docs/api/lnd/) docs for methods and types.
 
 
 ## Installation
@@ -20,11 +25,25 @@ use std::sync::Arc;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Arc::new(LndClient::new());
 
+    let start_args = "--lnddir=./lnd \
+        --noseedbackup \
+        --nolisten \
+        --bitcoin.active \
+        --bitcoin.regtest \
+        --bitcoin.node=neutrino \
+        --feeurl=\"https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json\" \
+        --routing.assumechanvalid \
+        --tlsdisableautofill \
+        --db.bolt.auto-compact \
+        --db.bolt.auto-compact-min-age=0 \
+        --neutrino.connect=localhost:19444";
+
     // Start LND
-    client.start("--bitcoin.active --bitcoin.regtest")?;
+    client.start(start_args)?;
 
     // Get node info
     let info: lnrpc::GetInfoResponse = client.call_lnd_method(lnrpc::GetInfoRequest {}, getInfo)?;
+
     println!("Node info: {:?}", info);
 
     Ok(())
