@@ -1,10 +1,11 @@
 // tests.rs
 
-use crate::{CCallback, LndClient};
+use crate::{CCallback, CRecvStream, LndClient};
 use lnd_grpc_rust::lnrpc;
 use lnd_grpc_rust::prost::Message;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
 // Mock LND struct
@@ -13,6 +14,7 @@ struct MockLnd {
     add_invoice_response: Mutex<Option<lnrpc::AddInvoiceResponse>>,
     connect_peer_response: Mutex<Option<Result<lnrpc::ConnectPeerResponse, String>>>,
     start_response: Mutex<Option<Result<(), String>>>,
+    peer_event: Mutex<Option<lnrpc::PeerEvent>>,
 }
 
 impl MockLnd {
@@ -22,6 +24,7 @@ impl MockLnd {
             add_invoice_response: Mutex::new(None),
             connect_peer_response: Mutex::new(None),
             start_response: Mutex::new(None),
+            peer_event: Mutex::new(None),
         }
     }
 
@@ -40,10 +43,14 @@ impl MockLnd {
     fn set_start_response(&self, response: Result<(), String>) {
         *self.start_response.lock().unwrap() = Some(response);
     }
+
+    fn set_peer_event(&self, event: lnrpc::PeerEvent) {
+        *self.peer_event.lock().unwrap() = Some(event);
+    }
 }
 
 lazy_static::lazy_static! {
-    static ref MOCK_LND: MockLnd = MockLnd::new();
+    static ref MOCK_LND: Arc<MockLnd> = Arc::new(MockLnd::new());
 }
 
 #[no_mangle]
@@ -66,6 +73,24 @@ pub unsafe extern "C" fn mock_start(_args: *mut c_char, callback: CCallback) -> 
         }
     } else {
         1
+    }
+}
+
+// Mock event subscription function
+unsafe extern "C" fn mock_subscribe_peer_events(
+    _request: *mut c_char,
+    _length: c_int,
+    recv_stream: CRecvStream,
+) {
+    if let Some(event) = MOCK_LND.peer_event.lock().unwrap().clone() {
+        let encoded = event.encode_to_vec();
+        if let Some(on_response) = recv_stream.onResponse {
+            on_response(
+                recv_stream.responseContext,
+                encoded.as_ptr() as *const c_char,
+                encoded.len() as c_int,
+            );
+        }
     }
 }
 
@@ -143,6 +168,49 @@ mod tests {
         let start_args = "--lnddir=./lnd --noseedbackup";
         let result = client.start(start_args);
         assert!(result.is_ok(), "Expected Ok, got Err: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_event_subscription() {
+        let client = Arc::new(LndClient::new());
+
+        let expected_event = lnrpc::PeerEvent {
+            pub_key: "02546bfe3778d7f8aea43224337d082bcc4521150569c94c9052413ae5b6599c2d"
+                .to_string(),
+            r#type: 1, // Connected
+            ..Default::default()
+        };
+        MOCK_LND.set_peer_event(expected_event.clone());
+
+        let (event_sender, event_receiver) = mpsc::channel();
+        let event_sender = Arc::new(Mutex::new(event_sender));
+
+        let subscription_result = client
+            .subscribe_events::<lnrpc::PeerEvent, lnrpc::PeerEventSubscription>(
+                mock_subscribe_peer_events,
+            )
+            .on_event(move |event_result| {
+                let sender = event_sender.lock().unwrap();
+                if let Ok(event) = event_result {
+                    sender.send(event).unwrap();
+                }
+            })
+            .with_request(lnrpc::PeerEventSubscription::default())
+            .subscribe();
+
+        assert!(
+            subscription_result.is_ok(),
+            "Failed to subscribe: {:?}",
+            subscription_result.err()
+        );
+
+        // Wait for the event to be received
+        let received_event = event_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("Timed out waiting for event");
+
+        assert_eq!(received_event.pub_key, expected_event.pub_key);
+        assert_eq!(received_event.r#type, expected_event.r#type);
     }
 
     #[test]
