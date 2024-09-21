@@ -10,6 +10,7 @@ mod lnd_client;
 pub use bidi_stream::BidiStreamBuilder;
 pub use event_subscription::EventSubscriptionBuilder;
 pub use lnd_client::LndClient;
+pub use lnd_grpc_rust;
 
 #[cfg(test)]
 mod tests;

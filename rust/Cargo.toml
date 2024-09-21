@@ -15,6 +15,6 @@ path = "src/main.rs"
 bindgen = "0.60"
 
 [dependencies]
-lnd_grpc_rust = "2.7.0"
+lnd_grpc_rust = "2.8.0"
 once_cell = "1.19.0"
 lazy_static = "1.4.0"

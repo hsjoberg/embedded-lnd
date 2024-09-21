@@ -708,9 +708,9 @@ checksum = "78b3ae25bc7c8c38cec158d1f2757ee79e9b3740fbc7ccf0e59e4b08d793fa89"
 
 [[package]]
 name = "lnd_grpc_rust"
-version = "2.7.0"
+version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8be74893182994484965d5f9bffe8f18cde688bb67e30bad81db24c4802bc52"
+checksum = "d4f2dd7b53caff596775c5bcf1e98b63f9b7369845f8723dab9e2aac79fefd4c"
 dependencies = [
  "hex",
  "hyper",
@@ -718,6 +718,7 @@ dependencies = [
  "openssl",
  "pretty_env_logger",
  "prost",
+ "serde",
  "tokio",
  "tokio-stream",
  "tonic",
