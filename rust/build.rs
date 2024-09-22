@@ -2,12 +2,13 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    println!(
-        "cargo:rustc-link-search=native={}",
-        env::current_dir().unwrap().display()
-    );
-    println!("cargo:rustc-link-lib=static=lnd");
+    // Look for LND_LIB_DIR environment variable
+    let lnd_lib_dir = env::var("LND_LIB_DIR").expect("LND_LIB_DIR must be set");
+
+    println!("cargo:rustc-link-search=native={}", lnd_lib_dir);
+    println!("cargo:rustc-link-lib=lnd");
     println!("cargo:rerun-if-changed=./liblnd.h");
+    println!("cargo:rerun-if-env-changed=LND_LIB_DIR");
 
     // Platform-specific configurations
     if cfg!(target_os = "macos") {
