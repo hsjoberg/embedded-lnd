@@ -7,7 +7,7 @@ fn main() {
         env::current_dir().unwrap().display()
     );
     println!("cargo:rustc-link-lib=static=lnd");
-    println!("cargo:rerun-if-changed=../liblnd.h");
+    println!("cargo:rerun-if-changed=./liblnd.h");
 
     // Platform-specific configurations
     if cfg!(target_os = "macos") {
@@ -25,8 +25,8 @@ fn main() {
     }
 
     let bindings = bindgen::Builder::default()
-        .header("../liblnd.h")
-        .allowlist_file("../liblnd.h")
+        .header("./liblnd.h")
+        .allowlist_file("./liblnd.h")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .generate()
         .expect("Unable to generate bindings");
