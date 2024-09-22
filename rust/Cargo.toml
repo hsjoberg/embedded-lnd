@@ -1,10 +1,11 @@
 [package]
 name = "embedded-lnd"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 description = "embedded-lnd is a Rust library that provides a high-level, safe interface for interacting with an embedded LND node."
 authors = ["Nitesh Balusu <niteshbalusu@icloud.com>"]
+repository = "https://github.com/hsjoberg/embedded-lnd/tree/master/rust"
 
 [lib]
 name = "embedded_lnd"
