@@ -12,6 +12,8 @@
 
 ```
 cargo add embedded-lnd
+
+# In your app, set the env variable LND_LIB_DIR=/path/to/static/lnd/binary
 ```
 
 ## Usage
