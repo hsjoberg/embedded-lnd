@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Result};
 use embedded_lnd::{
     addInvoice, channelAcceptor, connectPeer, getInfo, invoicesSubscribeSingleInvoice,
     subscribePeerEvents, LndClient,
@@ -5,7 +6,7 @@ use embedded_lnd::{
 use lnd_grpc_rust::{invoicesrpc, lnrpc};
 use std::sync::Arc;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<()> {
     let client = Arc::new(LndClient::new());
     let start_args = "--lnddir=./lnd \
         --noseedbackup \
@@ -25,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(()) => println!("LND started successfully"),
         Err(e) => {
             eprintln!("Error starting LND: {}", e);
-            return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)));
+            return Err(anyhow!("Failed to start lnd {:?}", e));
         }
     }
 
@@ -109,7 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             perm: true,
             timeout: 60,
         };
-        let connect_response: Result<lnrpc::ConnectPeerResponse, String> =
+        let connect_response: Result<lnrpc::ConnectPeerResponse> =
             client.call_lnd_method(connect_request, connectPeer);
         println!("Peer connection result: {:?}", connect_response);
 

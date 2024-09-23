@@ -267,7 +267,7 @@ mod tests {
             timeout: 60,
         };
 
-        let result: Result<lnrpc::ConnectPeerResponse, String> =
+        let result: anyhow::Result<lnrpc::ConnectPeerResponse> =
             client.call_lnd_method(connect_request, mock_connect_peer);
         assert!(result.is_ok(), "Expected Ok, got Err: {:?}", result.err());
         assert_eq!(result.unwrap(), expected_response);

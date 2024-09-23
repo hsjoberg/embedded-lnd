@@ -1,6 +1,7 @@
 use crate::bidi_stream::BidiStreamBuilder;
 use crate::event_subscription::EventSubscriptionBuilder;
 use crate::{start, CCallback, CRecvStream, SendStreamC, StopStreamC};
+use anyhow::{Context, Result};
 use lnd_grpc_rust::prost::Message;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -78,8 +79,8 @@ impl LndClient {
     /// # Returns
     ///
     /// A `Result` indicating success or failure.
-    pub fn start(&self, args: &str) -> Result<(), String> {
-        let c_args = CString::new(args).unwrap();
+    pub fn start(&self, args: &str) -> Result<()> {
+        let c_args = CString::new(args).context("Failed to create CString from args")?;
 
         extern "C" fn response_callback(
             _context: *mut c_void,
@@ -124,12 +125,15 @@ impl LndClient {
     /// # Returns
     ///
     /// A `Result` indicating success or failure.
-    pub fn stop_stream(&self, stream_ptr: usize) -> Result<(), String> {
+    pub fn stop_stream(&self, stream_ptr: usize) -> Result<()> {
         let result = unsafe { StopStreamC(stream_ptr) };
         if result == 0 {
             Ok(())
         } else {
-            Err(format!("Failed to stop stream. Error code: {}", result))
+            Err(anyhow::anyhow!(
+                "Failed to stop stream. Error code: {}",
+                result
+            ))
         }
     }
 
@@ -147,26 +151,27 @@ impl LndClient {
         &self,
         request: Req,
         lnd_func: unsafe extern "C" fn(*mut c_char, c_int, CCallback) -> (),
-    ) -> Result<Resp, String>
+    ) -> Result<Resp>
     where
         Req: Message,
         Resp: Message + Default,
     {
         let encoded = request.encode_to_vec();
-        let c_args = CString::new(encoded).unwrap();
-        let (tx, rx) = channel::<Result<Vec<u8>, String>>();
+        let c_args =
+            CString::new(encoded).context("Failed to create CString from encoded request")?;
+        let (tx, rx) = channel::<Result<Vec<u8>>>();
 
         extern "C" fn response_callback(context: *mut c_void, data: *const c_char, length: c_int) {
-            let tx = unsafe { &*(context as *const Sender<Result<Vec<u8>, String>>) };
+            let tx = unsafe { &*(context as *const Sender<Result<Vec<u8>>>) };
             let response =
                 unsafe { std::slice::from_raw_parts(data as *const u8, length as usize) };
             tx.send(Ok(response.to_vec())).unwrap();
         }
 
         extern "C" fn error_callback(context: *mut c_void, err: *const c_char) {
-            let tx = unsafe { &*(context as *const Sender<Result<Vec<u8>, String>>) };
+            let tx = unsafe { &*(context as *const Sender<Result<Vec<u8>>>) };
             let error = unsafe { CStr::from_ptr(err).to_str().unwrap_or("").to_string() };
-            tx.send(Err(error)).unwrap();
+            tx.send(Err(anyhow::anyhow!(error))).unwrap();
         }
 
         let callback = CCallback {
@@ -183,13 +188,12 @@ impl LndClient {
             let _ = CString::from_raw(c_args_ptr);
         }
 
-        match rx.recv_timeout(Duration::from_secs(30)) {
-            Ok(result) => result.and_then(|bytes| {
+        rx.recv_timeout(Duration::from_secs(30))
+            .context("Timeout waiting for response")?
+            .and_then(|bytes| {
                 Resp::decode(bytes.as_slice())
-                    .map_err(|e| format!("Failed to decode response: {}", e))
-            }),
-            Err(_) => Err("Timeout waiting for response".to_string()),
-        }
+                    .map_err(|e| anyhow::anyhow!("Failed to decode response: {}", e))
+            })
     }
 
     pub(crate) fn setup_bidirectional_stream<Req, Resp, F, G>(
@@ -197,7 +201,7 @@ impl LndClient {
         stream_func: unsafe extern "C" fn(CRecvStream) -> usize,
         on_request: F,
         get_response: G,
-    ) -> Result<usize, String>
+    ) -> Result<usize>
     where
         Req: Message + Default + Clone + 'static,
         Resp: Message + Default + 'static,
@@ -282,7 +286,7 @@ impl LndClient {
             unsafe {
                 let _ = Box::from_raw(context_ptr);
             };
-            Err("Failed to create send stream".to_string())
+            Err(anyhow::anyhow!("Failed to create send stream"))
         } else {
             unsafe {
                 (*context_ptr)
@@ -300,7 +304,7 @@ impl LndClient {
         subscribe_func: unsafe extern "C" fn(*mut c_char, c_int, CRecvStream) -> (),
         callback: F,
         request: R,
-    ) -> Result<(), String>
+    ) -> Result<()>
     where
         E: Message + Default + 'static,
         F: Fn(Result<E, String>) + Send + Sync + 'static,
@@ -352,7 +356,8 @@ impl LndClient {
         };
 
         let encoded = request.encode_to_vec();
-        let c_args = CString::new(encoded).unwrap();
+        let c_args =
+            CString::new(encoded).context("Failed to create CString from encoded request")?;
         unsafe {
             let c_args_len = c_args.as_bytes().len() as c_int;
             let c_args_ptr = c_args.into_raw();

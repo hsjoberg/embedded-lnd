@@ -1,5 +1,6 @@
 use crate::CRecvStream;
 use crate::LndClient;
+use anyhow::Result;
 use lnd_grpc_rust::prost::Message;
 use std::ffi::c_char;
 use std::marker::PhantomData;
@@ -52,9 +53,13 @@ where
     /// # Returns
     ///
     /// A `Result` indicating success or failure.
-    pub fn subscribe(self) -> Result<(), String> {
-        let callback = self.callback.ok_or("Event callback not set")?;
-        let request = self.request.ok_or("Subscription request not set")?;
+    pub fn subscribe(self) -> Result<()> {
+        let callback = self
+            .callback
+            .ok_or_else(|| anyhow::anyhow!("Event callback not set"))?;
+        let request = self
+            .request
+            .ok_or_else(|| anyhow::anyhow!("Subscription request not set"))?;
 
         self.client
             .subscribe_to_events(self.subscribe_func, callback, request)

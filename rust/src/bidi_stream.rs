@@ -1,5 +1,6 @@
 use crate::CRecvStream;
 use crate::LndClient;
+use anyhow::Result;
 use lnd_grpc_rust::prost::Message;
 use std::marker::PhantomData;
 
@@ -53,9 +54,13 @@ where
     /// # Returns
     ///
     /// A `Result` containing the stream pointer or an error.
-    pub fn build(self) -> Result<usize, String> {
-        let on_request = self.on_request.ok_or("on_request callback not set")?;
-        let get_response = self.get_response.ok_or("get_response callback not set")?;
+    pub fn build(self) -> Result<usize> {
+        let on_request = self
+            .on_request
+            .ok_or_else(|| anyhow::anyhow!("on_request callback not set"))?;
+        let get_response = self
+            .get_response
+            .ok_or_else(|| anyhow::anyhow!("get_response callback not set"))?;
 
         self.client
             .setup_bidirectional_stream(self.stream_func, on_request, get_response)
