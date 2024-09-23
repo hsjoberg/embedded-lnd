@@ -3,23 +3,22 @@ use crate::event_subscription::EventSubscriptionBuilder;
 use crate::{start, CCallback, CRecvStream, SendStreamC, StopStreamC};
 use anyhow::{Context, Result};
 use lnd_grpc_rust::prost::Message;
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 use std::sync::mpsc::{channel, Sender};
-use std::sync::Once;
 use std::sync::{Arc, Mutex};
+use std::sync::{LazyLock, Once};
 use std::time::Duration;
 
 static INIT: Once = Once::new();
 static mut CALLBACK: Option<CCallback> = None;
 type CallbackFn = Box<dyn Fn(Vec<u8>) + Send + Sync>;
 
-static GLOBAL_CALLBACKS: Lazy<Mutex<HashMap<usize, CallbackFn>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
-static NEXT_ID: Lazy<Mutex<usize>> = Lazy::new(|| Mutex::new(0));
+static GLOBAL_CALLBACKS: LazyLock<Mutex<HashMap<usize, CallbackFn>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static NEXT_ID: LazyLock<Mutex<usize>> = LazyLock::new(|| Mutex::new(0));
 
 /// The main client for interacting with the LND node.
 pub struct LndClient;

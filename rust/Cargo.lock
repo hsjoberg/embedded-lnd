@@ -277,7 +277,6 @@ dependencies = [
  "bindgen",
  "lazy_static",
  "lnd_grpc_rust",
- "once_cell",
 ]
 
 [[package]]
