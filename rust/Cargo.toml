@@ -21,6 +21,3 @@ bindgen = "0.60"
 [dependencies]
 lnd_grpc_rust = "2.8.0"
 anyhow = "1.0.89"
-
-[dev-dependencies]
-lazy_static = "1.4.0"

@@ -6,7 +6,7 @@ use lnd_grpc_rust::prost::Message;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 // Mock LND struct
 struct MockLnd {
@@ -16,6 +16,8 @@ struct MockLnd {
     start_response: Mutex<Option<Result<(), String>>>,
     peer_event: Mutex<Option<lnrpc::PeerEvent>>,
 }
+
+static MOCK_LND: LazyLock<Arc<MockLnd>> = LazyLock::new(|| Arc::new(MockLnd::new()));
 
 impl MockLnd {
     fn new() -> Self {
@@ -47,10 +49,6 @@ impl MockLnd {
     fn set_peer_event(&self, event: lnrpc::PeerEvent) {
         *self.peer_event.lock().unwrap() = Some(event);
     }
-}
-
-lazy_static::lazy_static! {
-    static ref MOCK_LND: Arc<MockLnd> = Arc::new(MockLnd::new());
 }
 
 #[no_mangle]
