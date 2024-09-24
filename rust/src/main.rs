@@ -1,11 +1,12 @@
 use anyhow::{anyhow, Result};
 use embedded_lnd::{
-    addInvoice, channelAcceptor, connectPeer, getInfo, invoicesSubscribeSingleInvoice,
+    addInvoice, channelAcceptor, connectPeer, getInfo, invoicesSubscribeSingleInvoice, stopDaemon,
     subscribePeerEvents, LndClient,
 };
 use lnd_grpc_rust::{invoicesrpc, lnrpc};
 use std::sync::Arc;
 
+#[allow(clippy::needless_update)]
 fn main() -> Result<()> {
     let client = Arc::new(LndClient::new());
     let start_args = "--lnddir=./lnd \
@@ -114,16 +115,19 @@ fn main() -> Result<()> {
             client.call_lnd_method(connect_request, connectPeer);
         println!("Peer connection result: {:?}", connect_response);
 
-        i = i + 1;
+        i += 1;
         // Sleep for 3 seconds before the next iteration
         std::thread::sleep(std::time::Duration::from_secs(3));
 
-        if i == 100 {
+        if i == 4 {
             break;
         }
     }
 
     client.stop_stream(acceptor)?;
+
+    let _stop_response: lnrpc::StopResponse =
+        client.call_lnd_method(lnrpc::StopRequest {}, stopDaemon)?;
 
     Ok(())
 }

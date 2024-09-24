@@ -20,8 +20,17 @@ static GLOBAL_CALLBACKS: LazyLock<Mutex<HashMap<usize, CallbackFn>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static NEXT_ID: LazyLock<Mutex<usize>> = LazyLock::new(|| Mutex::new(0));
 
+type OnRequest<Req> = Arc<Mutex<dyn Fn(Result<Req, String>) + Send + Sync>>;
+type GetResponse<Req, Resp> = Arc<Mutex<dyn Fn(Option<Req>) -> Option<Resp> + Send + Sync>>;
+
 /// The main client for interacting with the LND node.
 pub struct LndClient;
+
+impl Default for LndClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl LndClient {
     /// Creates a new instance of the LndClient.
@@ -208,8 +217,8 @@ impl LndClient {
         G: Fn(Option<Req>) -> Option<Resp> + Send + Sync + 'static,
     {
         struct Context<Req, Resp> {
-            on_request: Arc<Mutex<dyn Fn(Result<Req, String>) + Send + Sync>>,
-            get_response: Arc<Mutex<dyn Fn(Option<Req>) -> Option<Resp> + Send + Sync>>,
+            on_request: OnRequest<Req>,
+            get_response: GetResponse<Req, Resp>,
             send_stream: Mutex<Option<usize>>,
             last_request: Mutex<Option<Req>>,
         }

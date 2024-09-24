@@ -6,11 +6,13 @@ use std::ffi::c_char;
 use std::marker::PhantomData;
 use std::os::raw::c_int;
 
+pub type EventCallback<E> = Box<dyn Fn(Result<E, String>) + Send + Sync + 'static>;
+
 /// Builder for setting up an event subscription with the LND node.
 pub struct EventSubscriptionBuilder<'a, E, R> {
     client: &'a LndClient,
     subscribe_func: unsafe extern "C" fn(*mut c_char, c_int, CRecvStream) -> (),
-    callback: Option<Box<dyn Fn(Result<E, String>) + Send + Sync + 'static>>,
+    callback: Option<EventCallback<E>>,
     request: Option<R>,
     _phantom: PhantomData<E>,
 }

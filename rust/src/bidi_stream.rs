@@ -4,12 +4,15 @@ use anyhow::Result;
 use lnd_grpc_rust::prost::Message;
 use std::marker::PhantomData;
 
+pub type GetResponse<Req, Resp> = Box<dyn Fn(Option<Req>) -> Option<Resp> + Send + Sync + 'static>;
+pub type OnRequest<Req> = Box<dyn Fn(Result<Req, String>) + Send + Sync + 'static>;
+
 /// Builder for setting up a bidirectional stream with the LND node.
 pub struct BidiStreamBuilder<'a, Req, Resp> {
     client: &'a LndClient,
     stream_func: unsafe extern "C" fn(CRecvStream) -> usize,
-    on_request: Option<Box<dyn Fn(Result<Req, String>) + Send + Sync + 'static>>,
-    get_response: Option<Box<dyn Fn(Option<Req>) -> Option<Resp> + Send + Sync + 'static>>,
+    on_request: Option<OnRequest<Req>>,
+    get_response: Option<GetResponse<Req, Resp>>,
     _phantom: PhantomData<(Req, Resp)>,
 }
 
