@@ -1,7 +1,9 @@
 #include <napi.h>
 #include <iostream>
 #include <string>
+#define _CRT_USE_C_COMPLEX_H 1
 #include "../liblnd.h"  // Updated include path
+#undef _CRT_USE_C_COMPLEX_H
 #include "lnd_functions.h"
 // #include "lnd_server_streams.h"
 
